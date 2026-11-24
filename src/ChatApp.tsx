@@ -1,0 +1,67 @@
+import React, {Suspense,lazy,useEffect,useRef,useState} from 'react';
+import './chat.css';
+import UsagePanel from './UsagePanel';
+import SelectionExplainer from './SelectionExplainer';
+import LearningIntake, {type LearningIntakeData} from './LearningIntake';
+import PlannerDebugPanel from './PlannerDebugPanel';
+import PlainLanguageProvider,{AnnotatedMessage,AnnotatedRichText} from './PlainLanguagePanel';
+import type {DrawingSpec} from './TeachingDrawing';
+const TeachingDrawing=lazy(()=>import('./TeachingDrawing'));
+
+type Credential={session_id:string;token:string;title:string};
+type Message={id:string;agent:string;text:string;kind?:string;to_agent?:string;status?:string;task_id?:string;visuals?:DrawingSpec[];visual_error?:string};
+type Task={id:string;sender:string;recipient:string;objective:string;reason:string;status:string;feedback?:Record<string,unknown>};
+type Plan={id:string;goal:string;steps:string[];nodes:{id:string;title:string;status:string;delivered:boolean}[];progress_note?:string};
+type Snapshot={mode:string;revision:number;completed:boolean;working:boolean;messages:Message[];active_agent:string;profile:{goal:string;background:string};plan:Plan|null;pending_question:{id:string;question:string;objective:string}|null;tasks:Task[];evidence:{question:string;answer:string;verdict:string;observation:string;source:string;assisted?:boolean}[];report:unknown};
+const names:Record<string,string>={planner:'教学安排 Agent',lecturer:'授课 Agent',assessment:'测评 Agent',drawing:'教学绘图工具',student:'你'};
+const storage='aiteacher.chat.sessions.v1';
+
+function LearningRoute({plan}:{plan:Plan}){
+ const current=plan.nodes.find(n=>n.status==='current');
+ const [selected,setSelected]=useState(current?.id??plan.nodes[0]?.id??'');
+ useEffect(()=>setSelected(current?.id??plan.nodes.at(-1)?.id??''),[plan.id,current?.id]);
+ const node=plan.nodes.find(n=>n.id===selected);
+ const done=plan.nodes.filter(n=>n.status==='completed').length;
+ return <section className="learning-route" aria-label="教学大纲与进度"><div className="route-heading"><div><strong>学习路线</strong><span>{plan.goal}</span></div><span>{done} / {plan.nodes.length} 节点已确认理解</span></div><ol className="route-graph">{plan.nodes.map((n,i)=><li key={n.id} className={n.status}><button type="button" aria-label={`查看节点${i+1}：${n.title}`} aria-current={n.status==='current'?'step':undefined} aria-pressed={selected===n.id} onClick={()=>setSelected(n.id)}><span className="route-dot">{n.status==='completed'?'✓':i+1}</span><span className="route-node-title">{n.title}</span><small>{n.status==='completed'?'已确认理解':n.status==='current'?(n.delivered?'正在学习':'当前待开始'):'待学习'}</small></button>{i<plan.nodes.length-1&&<span className="route-arrow" aria-hidden="true">↓</span>}</li>)}</ol>{node&&<p className="route-detail"><strong>节点 {plan.nodes.indexOf(node)+1}：</strong>{node.title}</p>}<small>{plan.progress_note||'进度表示学生确认已理解，不等同于测评掌握。'} 点击节点可查看内容，不会跳课。</small></section>;
+}
+
+export default function ChatApp(){
+ const [sessions,setSessions]=useState<Credential[]>([]);
+ const [credential,setCredential]=useState<Credential|null>(null);
+ const [state,setState]=useState<Snapshot|null>(null);
+ const [input,setInput]=useState(''); const [recipient,setRecipient]=useState('auto');
+ const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [loading,setLoading]=useState(true);
+ const [collaboration,setCollaboration]=useState(true);
+ const [intakeOpen,setIntakeOpen]=useState(true);
+ const tail=useRef<HTMLDivElement>(null);const revision=useRef(-1);const active=useRef('');const locked=useRef(false);
+ async function request(path:string,cred:Credential|null,body?:unknown){
+  const response=await fetch(path,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...(cred?{Authorization:`Bearer ${cred.token}`}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
+  const data=await response.json();if(!response.ok)throw Object.assign(new Error(typeof data.detail==='string'?data.detail:'请求失败'),{status:response.status});return data;
+ }
+ function accept(snapshot:Snapshot,sid:string){if(active.current!==sid||snapshot.revision<revision.current)return;revision.current=snapshot.revision;setState(snapshot);}
+ function save(items:Credential[]){localStorage.setItem(storage,JSON.stringify(items));setSessions(items);}
+ async function restore(cred:Credential){active.current=cred.session_id;revision.current=-1;setCredential(cred);setState(null);setError('');try{const data=await request(`/api/sessions/${cred.session_id}`,cred);if(active.current===cred.session_id){accept(data.snapshot,cred.session_id);setIntakeOpen(!data.snapshot.completed&&!data.snapshot.plan&&!data.snapshot.messages.some((m:Message)=>m.agent==='student'));}}catch(e){setError((e as Error).message);}}
+ useEffect(()=>{let alive=true;(async()=>{try{const items=JSON.parse(localStorage.getItem(storage)||'[]') as Credential[];if(alive){setSessions(items);if(items.length)await restore(items[0]);}}catch{if(alive)setError('本机恢复入口无法读取，可以开始新会话。');}finally{if(alive)setLoading(false);}})();return()=>{alive=false;};},[]);
+ useEffect(()=>{if(!credential||!state?.working)return;const sid=credential.session_id;const timer=setInterval(async()=>{if(locked.current)return;try{const data=await request(`/api/sessions/${sid}`,credential);accept(data.snapshot,sid);setError('');}catch{setError('暂时无法获取生成进度，正在重试。');}},1200);return()=>clearInterval(timer);},[credential,state?.working]);
+ useEffect(()=>{if(!intakeOpen)tail.current?.scrollIntoView({behavior:'smooth',block:'end'});},[state?.messages.length,state?.working,intakeOpen]);
+ async function start(intake?:LearningIntakeData){if(locked.current)return false;locked.current=true;setBusy(true);setError('');try{
+  let cred=credential,snapshot=state;
+  const fresh=cred&&snapshot&&!snapshot.completed&&!snapshot.plan&&!snapshot.messages.some(m=>m.agent==='student');
+  if(!fresh){const data=await request('/api/sessions',null,{mode:'chat'});cred={session_id:data.session_id,token:data.token,title:`${intake?.topic.slice(0,24)||'学习会话'} · ${new Date().toLocaleString('zh-CN')}`};snapshot=data.snapshot;active.current=cred.session_id;revision.current=-1;setCredential(cred);accept(snapshot!,cred.session_id);save([cred,...sessions]);}
+  if(!cred||!snapshot)throw new Error('会话未能创建，请重试。');
+  if(intake){const data=await request(`/api/sessions/${cred.session_id}/events`,cred,{expected_revision:snapshot.revision,idempotency_key:crypto.randomUUID(),type:'chat_intake',payload:intake});accept(data.snapshot,cred.session_id);}
+  setIntakeOpen(false);setInput('');return true;
+ }catch(e){setError((e as Error).message);if((e as {status?:number}).status===409&&active.current&&credential){try{accept((await request(`/api/sessions/${active.current}`,credential)).snapshot,active.current);}catch{}}return false;}finally{locked.current=false;setBusy(false);}}
+ async function send(type:string,text?:string){if(!credential||!state||locked.current)return;locked.current=true;setBusy(true);setError('');const sid=credential.session_id;try{const data=await request(`/api/sessions/${sid}/events`,credential,{expected_revision:state.revision,idempotency_key:crypto.randomUUID(),type,payload:type==='chat_message'?{text:text??input,recipient}:{}});accept(data.snapshot,sid);if(type==='chat_message')setInput('');}catch(e){setError((e as Error).message);if((e as {status?:number}).status===409){try{accept((await request(`/api/sessions/${sid}`,credential)).snapshot,sid);}catch{}}}finally{locked.current=false;setBusy(false);}}
+ function download(){if(!state)return;const text=`# 学习记录\n\n目标：${state.profile.goal||'尚未明确'}\n\n${state.messages.filter(m=>m.status!=='pending').map(m=>`## ${names[m.agent]||m.agent}${m.to_agent?` → ${names[m.to_agent]}`:''}\n\n${m.text}`).join('\n\n')}\n\n## 测评证据（模型判断）\n\n${state.evidence.map(e=>`${e.question}\n回答：${e.answer}\n${e.verdict}：${e.observation}`).join('\n\n')}`;const url=URL.createObjectURL(new Blob([text],{type:'text/markdown;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='AI私教-学习记录.md';a.click();URL.revokeObjectURL(url);}
+ return <main className={`chat-app${intakeOpen?' intake-visible':state?' classroom-with-notes':''}`}><SelectionExplainer credential={intakeOpen?null:credential}/>
+  <header><h1>AI 私教 · 聊天实验室</h1><button disabled={busy||loading||intakeOpen} onClick={()=>{setIntakeOpen(true);setError('');window.scrollTo({top:0,behavior:'smooth'});}}>新学习会话</button>{!intakeOpen&&<><button disabled={!state} onClick={download}>下载记录</button>{state&&!state.completed&&<button disabled={busy} onClick={()=>send('chat_end')}>结束并保存</button>}</>}</header>
+  <p className="chat-caption">{intakeOpen?'每个人都有自己的起点，也值得有自己的学习节奏。':'不限课题，通过对话探索教学安排、授课和测评的协作。测评为模型判断，可能存在误判。'}</p>
+  {sessions.length>0&&<label className="chat-sessions">恢复会话 <select aria-label="恢复学习会话" value={credential?.session_id||''} disabled={busy} onChange={e=>{const cred=sessions.find(c=>c.session_id===e.target.value);if(cred)restore(cred);}}>{sessions.map(c=><option key={c.session_id} value={c.session_id}>{c.title}</option>)}</select></label>}
+  {error&&<p role="alert" className="chat-error">{error}</p>}
+  {loading?<p role="status">正在恢复记录…</p>:intakeOpen||!state?<LearningIntake busy={busy} onSubmit={start} onSkip={()=>{void start();}} onCancel={state?()=>setIntakeOpen(false):undefined}/>:<>
+   <div className="chat-toolbar"><span>当前：{names[state.active_agent]}</span><label><input type="checkbox" checked={collaboration} onChange={e=>setCollaboration(e.target.checked)}/> 显示 Agent 交接</label>{state.working&&<strong role="status">Agent 正在处理，可以发送新消息打断</strong>}{state.completed&&<strong>已保存</strong>}</div>
+   <PlainLanguageProvider key={credential?.session_id} credential={credential} messages={state.messages} working={state.working}><div className="chat-layout"><aside className="learning-sidebar" aria-label="学习路线与课堂记录">{credential&&<PlannerDebugPanel key={credential.session_id} credential={credential} revision={state.revision} working={state.working}/>}{state.plan?.nodes?.length ? <LearningRoute plan={state.plan}/>:null}<div className="chat-inspector">{credential&&<UsagePanel credential={credential} revision={state.revision}/>}<details open><summary>当前教学安排</summary><p>目标：{state.profile.goal||'尚未明确'}</p><p>基础自述：{state.profile.background}</p>{state.plan&&<ol>{state.plan.steps.map((s,i)=><li key={i}>{s}</li>)}</ol>}</details><details><summary>任务与反馈 · {state.tasks.length}</summary>{state.tasks.map(t=><div className="task-record" key={t.id}><strong>{names[t.sender]} → {names[t.recipient]}</strong><p>任务：{t.objective}</p><p>依据：{t.reason}</p><small>{t.status}</small>{t.feedback&&<pre>{JSON.stringify(t.feedback,null,2)}</pre>}</div>)}</details><details><summary>学习证据 · {state.evidence.length}</summary>{state.evidence.map((e,i)=><div className="task-record" key={i}><p>{e.question}</p><p>{e.verdict}：{e.observation}</p><small>{e.assisted?'使用过讲解帮助 · ':''}模型判断，不等同于长期掌握。</small></div>)}</details></div></aside><div className="conversation-column"><section className="conversation" aria-label="课堂对话" aria-live="polite">{state.messages.filter(m=>collaboration||m.kind!=='handoff').map(m=><AnnotatedMessage key={m.id} source={m}><article className={`conversation-message ${m.agent} ${m.kind==='handoff'?'transfer':''}`} key={m.id} data-message-id={m.id}><div><strong>{names[m.agent]||m.agent}{m.to_agent?` → ${names[m.to_agent]}`:''}</strong><small>{m.status==='ai'?'DeepSeek':m.kind==='handoff'?'⇄ Agent 交接':m.status==='pending'?'生成中':m.status==='failed'?'未成功':m.status==='cancelled'?'已替代':''}</small></div><p><AnnotatedRichText source={m}/></p>{m.visual_error&&<p className="drawing-error">{m.visual_error}</p>}{m.visuals?.map(v=><Suspense key={v.id} fallback={<p>正在加载教学图…</p>}><TeachingDrawing spec={v}/></Suspense>)}</article></AnnotatedMessage>)}<div ref={tail}/></section>{!state.completed&&<form className="conversation-compose" onSubmit={e=>{e.preventDefault();if(input.trim())send('chat_message');}}><div className="teaching-shortcuts"><button type="button" disabled={busy||state.working||(!state.plan&&!state.messages.some(m=>m.agent==='lecturer'&&m.status==='ai'))} onClick={()=>send('chat_example')}>✦ 举个例子</button><button type="button" disabled={busy||state.working||!!state.pending_question||!state.plan?.nodes?.some(n=>n.status==='current')} onClick={()=>send('chat_continue')} title={state.pending_question?'请先完成当前测评，继续不代表测评通过':'确认当前节点已理解，进入下一节点'}>我明白了，继续 →</button></div><label>交给谁 <select aria-label="对话对象" value={recipient} onChange={e=>setRecipient(e.target.value)}><option value="auto">自动安排{state.pending_question?' · 下一条按测评回答处理':''}</option><option value="planner">教学安排 Agent · 调整或打断测评</option><option value="lecturer">授课 Agent · 提问或讲解</option><option value="assessment">测评 Agent · 出题或作答</option></select></label>{state.pending_question&&<small>正在等待测评作答；若想改目标或暂停，可切换到教学安排 Agent。</small>}<textarea aria-label="聊天消息" value={input} onChange={e=>setInput(e.target.value)} maxLength={4000} rows={3} placeholder="告诉我想学什么，或随时提问、作答、调整安排…" onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();if(input.trim())send('chat_message');}}}/><div><span>Enter 发送 · Shift + Enter 换行</span><button disabled={busy||!input.trim()}>{busy?'提交中…':state.working?'发送并替代上次请求':'发送'}</button></div></form>}</div></div></PlainLanguageProvider>
+  </>}
+ </main>;
+}

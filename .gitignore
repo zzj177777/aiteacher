@@ -1,0 +1,25 @@
+node_modules/
+.npm-cache/
+dist/
+.venv/
+__pycache__/
+*.pyc
+data/
+.env
+*.log
+.verification/
+
+# Local credentials, runtime databases and build metadata
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+*.tsbuildinfo
+*.pem
+*.key
+.DS_Store
+Thumbs.db

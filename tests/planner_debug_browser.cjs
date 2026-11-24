@@ -1,0 +1,60 @@
+// Run against an isolated service with a local fake provider, never a real classroom.
+const assert=require('node:assert/strict');
+const path=require('node:path');
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE_PATH||'playwright');
+const base=process.env.DEBUG_TEST_URL||'http://127.0.0.1:8012';
+(async()=>{
+  const browser=await chromium.launch({channel:'msedge',headless:true});
+  const context=await browser.newContext({viewport:{width:1440,height:1100},reducedMotion:'reduce'});
+  const page=await context.newPage(),errors=[];page.on('pageerror',error=>errors.push(error.message));
+  const output=path.resolve(__dirname,'../.verification');
+  const panel=page.locator('.debug-inline-content').first();
+  try{
+    await page.goto(base);
+    await page.getByRole('button',{name:'想边聊边说？直接聊天'}).click();
+    await panel.getByText('还没有记录。',{exact:false}).waitFor();
+    await page.getByRole('textbox',{name:'聊天消息'}).fill('我是初学者，想学习分数');
+    await page.getByRole('button',{name:'发送',exact:true}).click();
+    await panel.locator('.debug-state').filter({hasText:'等待回复'}).waitFor();
+    await panel.getByText('发给模型的问题与上下文',{exact:false}).waitFor();
+    await panel.locator('.debug-state').filter({hasText:'调用完成'}).waitFor();
+    await panel.getByRole('button',{name:'模型原始回复',exact:true}).click();
+    await panel.getByText('工具调用 · arrange_learning',{exact:true}).waitFor();
+    assert.equal(await panel.locator('.debug-answer pre').textContent().then(t=>t.includes('根据学生目标形成初步计划')),true);
+    await page.screenshot({path:path.join(output,'debug-sidebar.png'),fullPage:true});
+    await page.getByRole('button',{name:'放大安排调试'}).click();
+    const dialog=page.getByRole('dialog');await dialog.waitFor();
+    await dialog.getByRole('button',{name:'发送给模型',exact:true}).click();
+    await dialog.getByText('系统提示词',{exact:false}).first().click();
+    assert.equal(await dialog.locator('pre').first().textContent().then(t=>t.includes('你是教学安排 Agent')),true);
+    await page.screenshot({path:path.join(output,'debug-expanded.png'),fullPage:true});
+    await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});
+    await page.reload();await panel.getByRole('button',{name:'模型原始回复',exact:true}).click();
+    await panel.getByText('工具调用 · arrange_learning',{exact:true}).waitFor();
+    const firstCredential=await page.evaluate(()=>JSON.parse(localStorage.getItem('aiteacher.chat.sessions.v1'))[0]);
+    const traces=await context.request.get(`${base}/api/sessions/${firstCredential.session_id}/debug/planner`,{headers:{Authorization:`Bearer ${firstCredential.token}`}}).then(r=>r.json());
+    assert.equal(traces.calls[0].response.id,'local-provider-response');
+    assert.equal(JSON.stringify(traces).includes('PRIVATE_REASONING_TEST'),false);
+    assert.equal(JSON.stringify(traces).includes('local-test-key-only'),false);
+    await page.getByRole('button',{name:'新学习会话'}).click();
+    await page.getByRole('button',{name:'想边聊边说？直接聊天'}).click();
+    await panel.getByText('还没有记录。',{exact:false}).waitFor();
+    await page.getByRole('textbox',{name:'聊天消息'}).fill('invalid-json');
+    await page.getByRole('button',{name:'发送',exact:true}).click();
+    await panel.locator('.debug-state').filter({hasText:'调用失败'}).waitFor();
+    await panel.getByRole('button',{name:'模型原始回复',exact:true}).click();
+    await panel.getByText('{invalid original tool arguments',{exact:true}).waitFor();
+    await page.setViewportSize({width:390,height:844});
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false);
+    await page.getByRole('button',{name:'放大安排调试'}).click();await dialog.waitFor();
+    await page.screenshot({path:path.join(output,'debug-mobile.png'),fullPage:true});
+    await dialog.getByRole('button',{name:'关闭调试大窗'}).click();
+    // Switch to the first session; failed content from the second must disappear.
+    await page.getByRole('combobox',{name:'恢复学习会话'}).selectOption(firstCredential.session_id);
+    await panel.locator('.debug-state').filter({hasText:'调用完成'}).waitFor();
+    await panel.getByRole('button',{name:'模型原始回复',exact:true}).click();
+    assert.equal(await panel.getByText('{invalid original tool arguments',{exact:true}).count(),0);
+    assert.deepEqual(errors,[]);
+    console.log('PASS: real adapter, pending updates, raw tool replies, schema failure retention, expanded view, persistence, session isolation, mobile layout.');
+  }finally{await browser.close();}
+})().catch(error=>{console.error(error);process.exitCode=1;});

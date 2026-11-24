@@ -1,0 +1,57 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+const ts = require('typescript');
+const React = require('react');
+const { renderToStaticMarkup } = require('react-dom/server');
+const source = fs.readFileSync(path.join(__dirname, '../src/RichText.tsx'), 'utf8');
+const compiled = ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText;
+const componentModule = {exports:{}};
+new Function('require','module','exports',compiled)(require,componentModule,componentModule.exports);
+const render = text => renderToStaticMarkup(React.createElement(componentModule.exports.default,{text}));
+assert.match(render('这是**重点**，再看**第二点**。'), /<strong>重点<\/strong>，再看<strong>第二点<\/strong>/);
+assert.equal(render('尚未闭合的**强调'), '尚未闭合的**强调');
+assert.match(render('使用 `f(x)`'), /<code>f\(x\)<\/code>/);
+const hostile=render('**<img src=x onerror=alert(1)>**');
+assert.ok(!hostile.includes('<img'));
+assert.ok(hostile.includes('&lt;img'));
+console.log('RichText rendering checks passed (emphasis, code, unmatched markers, escaped HTML).');
+for(const text of [String.raw`行内 \(x^2+\frac{1}{2}\)`,String.raw`独立 \[\int_0^1 x^2\,dx=\frac13\]`,String.raw`$a_1$ 与 $$\sum_{i=1}^n i$$`]){
+ const html=render(text);assert.ok(html.includes('class="katex"'));assert.ok(html.includes('<math'));
+}
+assert.ok(render(String.raw`\[\begin{pmatrix}1&2\\3&4\end{pmatrix}\]`).includes('katex-display'));
+assert.match(render(String.raw`**重点 \(x^2\)**`), /<strong>重点 <span class="formula-inline">/);
+assert.ok(render('`$x$`').includes('class="katex"'));
+assert.ok(render('```latex\n$x$\n```').includes('class="katex"'));
+assert.ok(render(String.raw`错误 \(\frac{\)`).includes('formula-fallback'));
+assert.ok(!render(String.raw`\(\href{javascript:alert(1)}{x}\)`).includes('href="javascript:'));
+console.log('Math rendering checks passed (inline, display, matrix, nested emphasis, code isolation, fallback, untrusted links).');
+
+// The exact reported matrix must render identically to correctly escaped TeX.
+const correct=String.raw`$\begin{pmatrix}1&2\\0&1\end{pmatrix}$`;
+const doubled=String.raw`$\\begin{pmatrix}1&2\\\\0&1\\end{pmatrix}$`;
+assert.equal(render(doubled),render(correct));
+assert.equal(render('`'+doubled+'`'),render(correct));
+const reported='`'+doubled+'`；第 1 行减去第 2 行的 2 倍，得 `'+String.raw`$\\begin{pmatrix}1&0\\\\0&1\\end{pmatrix}=E$`+'`。确实化成了单位矩阵。';
+assert.equal((render(reported).match(/class="katex"/g)||[]).length,2);
+assert.ok(!render(reported).includes('formula-fallback'));
+assert.ok(render(String.raw`\\(\\frac{1}{2}\\)`).includes('class="katex"'));
+assert.equal(render(String.raw`$\\frac{1}{2}$`),render(String.raw`$\frac{1}{2}$`));
+assert.ok(render('```python\nprint("$x$")\n```').includes('<code>'));
+assert.ok(!render('```python\nprint("$x$")\n```').includes('class="katex"'));
+assert.equal(render('文件 C:\\temp\\file 与 `\\begin`'), '文件 C:\\temp\\file 与 <code>\\begin</code>');
+console.log('Regression checks passed (double escaping, matrix rows, math code wrappers, programming code preservation).');
+
+const annotate=(text,quote)=>renderToStaticMarkup(React.createElement(componentModule.exports.default,{text,annotations:[{id:'annotation-1',index:0,start:text.indexOf(quote),end:text.indexOf(quote)+quote.length}]}));
+const splitBold=annotate('这里的**分母**表示平均分的份数。','**分母**表示平均分的份数');
+assert.match(splitBold,/<strong><mark[^>]+>分母<\/mark><\/strong>/);
+assert.ok((splitBold.match(/data-plain-ids="annotation-1"/g)||[]).length>=2);
+const mathText=String.raw`先看 $\frac{1}{4}$，再理解整体。`;
+const annotatedMath=annotate(mathText,String.raw`$\frac{1}{4}$`);
+assert.equal((annotatedMath.match(/class="katex"/g)||[]).length,1);
+assert.ok(annotatedMath.includes('plain-quote-anchor'));
+assert.ok(!annotatedMath.includes('formula-fallback'));
+const unsafe=annotate('解释 <img onerror=alert(1)>','<img onerror=alert(1)>');
+assert.ok(!unsafe.includes('<img'));assert.ok(unsafe.includes('&lt;img'));
+assert.ok(annotate('第一行\n第二行','第一行\n第二行').includes('data-plain-ids="annotation-1"'));
+console.log('Annotation checks passed (cross-bold source spans, intact formulas, multiline quotes, escaped HTML).');

@@ -1,0 +1,14 @@
+const fs=require('node:fs');
+const path=require('node:path');
+const assert=require('node:assert/strict');
+const ts=require('typescript');
+const source=fs.readFileSync(path.join(__dirname,'../src/drawingExpression.ts'),'utf8');
+const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+const mod={exports:{}};new Function('require','module','exports',compiled)(require,mod,mod.exports);
+const build=mod.exports.buildFunction;
+assert.equal(build('x^2')(3),9);
+assert.ok(Math.abs(build('sin(pi*x)')(0.5)-1)<1e-12);
+assert.equal(build('sqrt(x)')(-1).toString(),'NaN');
+for(const expression of ['x=2','x.constructor','[1,2]','import(x)','evaluate(x)','x!','"hello"','x > 2','f(x)=x+1'])assert.throws(()=>build(expression));
+assert.throws(()=>build('x+'.repeat(150)+'x'));
+console.log('Drawing expression checks passed (mathjs evaluation, invalid-domain fallback, restricted AST).');
