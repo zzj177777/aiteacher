@@ -104,6 +104,17 @@ class BoardApiTests(unittest.TestCase):
         self.assertEqual(code, 200); self.assertEqual(result['status'], 'completed')
         return result
 
+    def test_retries_an_invalid_source_quote_with_specific_feedback(self):
+        invalid = designed()
+        invalid['steps'][0]['source_quote'] = '这句话没有出现在原文中。'
+        responses = [{'tool': 'design_step_board', 'arguments': args} for args in (invalid, designed())]
+        with patch.object(board, 'call_tool', side_effect=responses) as model:
+            result = self.create()
+        self.assertEqual(model.call_count, 2)
+        self.assertEqual(model.call_args.args[1]['previous_validation_error'], 'source_quote_not_in_lecture')
+        self.assertEqual(result['result']['steps'][0]['source_quote'], designed()['steps'][0]['source_quote'])
+        self.assertEqual(self.state, self.original)
+
     def test_auth_private_rubric_and_cache_without_teaching_changes(self):
         self.assertEqual(self.call('/boards', {'message_id': 'lecture'}, None)[0], 401)
         self.assertEqual(self.call('/boards', {'message_id': 'lecture'}, 'wrong')[0], 404)

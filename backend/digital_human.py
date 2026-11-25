@@ -31,6 +31,7 @@ def character_catalog():
         {'id': 'mao', 'name': 'Mao', 'mode': 'live2d', 'description': '魔法少女 · 动态形象',
          'available': CORE.is_file() and (MODEL / 'mao_pro.model3.json').is_file(),
          'model_url': '/digital-assets/characters/mao/mao_pro.model3.json',
+         'mouth_parameter': 'ParamA',
          'credit': 'Sample model © Live2D Inc.', 'source_url': 'https://www.live2d.com/en/learn/sample/niziiro-mao/'},
         {'id': 'miku', 'name': '初音未来', 'mode': 'live2d', 'description': '初音未来 · 动态形象',
          'available': CORE.is_file() and (HOME / 'live2d-models/miku/runtime/miku.model3.json').is_file(),
