@@ -1,0 +1,55 @@
+{
+  "source_url": "https://github.com/ardorleo/keben",
+  "label": "公开镜像存档（旧版参考）",
+  "note": "公开镜像文件，非出版社当前目录文件；版次以版权页核验为准。",
+  "books": [
+    {
+      "material_id": "pep-primary-math-g1-t2",
+      "edition_id": "public-mirror-archive",
+      "path": "小学/数学/人教版/义务教育教科书·数学一年级下册.pdf",
+      "git_blob_sha": "54a2d6303c6d34c664afb47eda465c02f8547bc0",
+      "bytes": 31615878,
+      "reader_url": "https://raw.githubusercontent.com/ardorleo/keben/master/%E5%B0%8F%E5%AD%A6/%E6%95%B0%E5%AD%A6/%E4%BA%BA%E6%95%99%E7%89%88/%E4%B9%89%E5%8A%A1%E6%95%99%E8%82%B2%E6%95%99%E7%A7%91%E4%B9%A6%C2%B7%E6%95%B0%E5%AD%A6%E4%B8%80%E5%B9%B4%E7%BA%A7%E4%B8%8B%E5%86%8C.pdf"
+    },
+    {
+      "material_id": "pep-primary-math-g2-t2",
+      "edition_id": "public-mirror-archive",
+      "path": "小学/数学/人教版/义务教育教科书·数学二年级下册.pdf",
+      "git_blob_sha": "a125a60b78392e1d56b95759438a5129ca8d234d",
+      "bytes": 25106337,
+      "reader_url": "https://raw.githubusercontent.com/ardorleo/keben/master/%E5%B0%8F%E5%AD%A6/%E6%95%B0%E5%AD%A6/%E4%BA%BA%E6%95%99%E7%89%88/%E4%B9%89%E5%8A%A1%E6%95%99%E8%82%B2%E6%95%99%E7%A7%91%E4%B9%A6%C2%B7%E6%95%B0%E5%AD%A6%E4%BA%8C%E5%B9%B4%E7%BA%A7%E4%B8%8B%E5%86%8C.pdf"
+    },
+    {
+      "material_id": "pep-primary-math-g3-t2",
+      "edition_id": "public-mirror-archive",
+      "path": "小学/数学/人教版/义务教育教科书·数学三年级下册.pdf",
+      "git_blob_sha": "bd971ec8d40dd1a3d16677c7105bf2fda21acd4d",
+      "bytes": 15535688,
+      "reader_url": "https://raw.githubusercontent.com/ardorleo/keben/master/%E5%B0%8F%E5%AD%A6/%E6%95%B0%E5%AD%A6/%E4%BA%BA%E6%95%99%E7%89%88/%E4%B9%89%E5%8A%A1%E6%95%99%E8%82%B2%E6%95%99%E7%A7%91%E4%B9%A6%C2%B7%E6%95%B0%E5%AD%A6%E4%B8%89%E5%B9%B4%E7%BA%A7%E4%B8%8B%E5%86%8C.pdf"
+    },
+    {
+      "material_id": "pep-primary-math-g4-t2",
+      "edition_id": "public-mirror-archive",
+      "path": "小学/数学/人教版/义务教育教科书·数学四年级下册.pdf",
+      "git_blob_sha": "fb6fd8d07b116352639b6c62af9bc5b7ddc8c84e",
+      "bytes": 14949022,
+      "reader_url": "https://raw.githubusercontent.com/ardorleo/keben/master/%E5%B0%8F%E5%AD%A6/%E6%95%B0%E5%AD%A6/%E4%BA%BA%E6%95%99%E7%89%88/%E4%B9%89%E5%8A%A1%E6%95%99%E8%82%B2%E6%95%99%E7%A7%91%E4%B9%A6%C2%B7%E6%95%B0%E5%AD%A6%E5%9B%9B%E5%B9%B4%E7%BA%A7%E4%B8%8B%E5%86%8C.pdf"
+    },
+    {
+      "material_id": "pep-primary-math-g5-t2",
+      "edition_id": "public-mirror-archive",
+      "path": "小学/数学/人教版/义务教育教科书·数学五年级下册.pdf",
+      "git_blob_sha": "aedba04603464994037b38a4ccbac0217a554142",
+      "bytes": 14621452,
+      "reader_url": "https://raw.githubusercontent.com/ardorleo/keben/master/%E5%B0%8F%E5%AD%A6/%E6%95%B0%E5%AD%A6/%E4%BA%BA%E6%95%99%E7%89%88/%E4%B9%89%E5%8A%A1%E6%95%99%E8%82%B2%E6%95%99%E7%A7%91%E4%B9%A6%C2%B7%E6%95%B0%E5%AD%A6%E4%BA%94%E5%B9%B4%E7%BA%A7%E4%B8%8B%E5%86%8C.pdf"
+    },
+    {
+      "material_id": "pep-primary-math-g6-t2",
+      "edition_id": "public-mirror-archive",
+      "path": "小学/数学/人教版/义务教育教科书·数学六年级下册.pdf",
+      "git_blob_sha": "89a49aeadb26f0c13cec8d5b6fd6fd08c0fb25a9",
+      "bytes": 13134464,
+      "reader_url": "https://raw.githubusercontent.com/ardorleo/keben/master/%E5%B0%8F%E5%AD%A6/%E6%95%B0%E5%AD%A6/%E4%BA%BA%E6%95%99%E7%89%88/%E4%B9%89%E5%8A%A1%E6%95%99%E8%82%B2%E6%95%99%E7%A7%91%E4%B9%A6%C2%B7%E6%95%B0%E5%AD%A6%E5%85%AD%E5%B9%B4%E7%BA%A7%E4%B8%8B%E5%86%8C.pdf"
+    }
+  ]
+}

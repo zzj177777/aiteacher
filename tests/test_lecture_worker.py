@@ -14,6 +14,7 @@ class LectureWorkerTests(unittest.TestCase):
         self.database.start()
         with server.connect() as db:
             db.execute('CREATE TABLE sessions(id TEXT PRIMARY KEY, token_hash TEXT, state TEXT, created_at TEXT)')
+            server.courses.initialize(db)
         with patch('backend.lecturer.configured',return_value=True):
             self.state = new_state()
             for _ in range(3):

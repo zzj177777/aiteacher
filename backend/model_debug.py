@@ -74,6 +74,9 @@ def save(record):
 def capture_request(body):
     record=_call.get()
     if record is None:return
+    definitions=body.get('tools') or []
+    if definitions:
+        record['tool']=definitions[0].get('function',{}).get('name',record['tool'])
     record.update(request=safe(body),status='pending',sent_at=datetime.now(timezone.utc).isoformat())
     save(record)
 

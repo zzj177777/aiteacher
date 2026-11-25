@@ -4,7 +4,7 @@
 
 backend/usage.py 使用 ContextVar 将 session_id、job_id、agent 关联到调用。tutor.complete / call_tool 每次结束独立落库 data/model_usage.sqlite3 的 model_calls 表：调用ID、时间、模型、角色、耗时、状态、错误码、供应商 usage 的输入/输出/总token及缓存命中/未命中token、估算费用和单价快照。未返回usage的字段为未知，不使用字符数猜测。
 
-同一会话的安排、授课、测评、选中解释及旧模式调用都关联计量；无会话的开发调用记录 session_id=null，不计入任一课堂。数据库路径可用 AITEACHER_USAGE_DB 覆盖。
+同一会话的安排、授课、测评、选中解释及旧模式调用都关联计量；数字人课堂辅助编排（board_designer）和本步判答（board_check）也关联原会话，缓存复用和明确跳过不发起新模型调用；无会话的开发调用记录 session_id=null，不计入任一课堂。数据库路径可用 AITEACHER_USAGE_DB 覆盖。
 
 记录独立于课堂事务：模型返回后JSON解析失败仍保留usage，整轮回滚、结果过期或学生结束课堂也不删除调用。completed只代表模型调用和适配器解析完成；之后的业务字段校验失败可导致课堂失败，应通过job_id关联课堂诊断。未返回响应的网络失败可能已产生供应商费用，记用量/费用未知。进程被强制终止时，尚未结束的调用当前不能完整记录，不是计费系统。
 

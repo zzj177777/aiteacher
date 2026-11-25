@@ -43,3 +43,13 @@ class UsageTests(unittest.TestCase):
         a=usage.summary('session-a');self.assertEqual(a['failed_calls'],1)
         self.assertEqual(a['unpriced_calls'],1)
         self.assertEqual(usage._scope.get(),{})
+
+    def test_course_planning_usage_is_separate_from_other_courses_and_sessions(self):
+        response={'choices':[{'message':{'content':'ok'}}],'usage':{'prompt_tokens':10,'completion_tokens':5}}
+        with usage.scope(course_id='course-a',agent='course_planner'),patch('backend.tutor.urlopen',return_value=io.BytesIO(json.dumps(response).encode())):
+            tutor.complete('course planning',{})
+        self.invoke(response,sid='session-b')
+        self.assertEqual(usage.summary(course_id='course-a')['call_count'],1)
+        self.assertEqual(usage.summary(course_id='course-b')['call_count'],0)
+        self.assertEqual(usage.summary('session-b')['call_count'],1)
+        self.assertEqual(usage.summary(course_id='course-a')['recent_calls'][0]['agent'],'course_planner')

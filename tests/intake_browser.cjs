@@ -12,7 +12,7 @@ const output=path.resolve(__dirname,'../.verification');
   const page=await context.newPage();
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   try{
-    await page.goto(base);await page.getByRole('heading',{name:'今天，我们学点什么？'}).waitFor();
+    await page.goto(base);await page.getByRole('button',{name:'直接开始小课'}).click();await page.getByRole('heading',{name:'今天，我们学点什么？'}).waitFor();
     await page.screenshot({path:path.join(output,'intake-desktop.png'),fullPage:true});
     await page.getByRole('button',{name:'生成我的学习计划'}).click();
     assert.equal(await page.getByText('请选择至少一个学习目标。').count(),1);

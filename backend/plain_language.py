@@ -51,6 +51,7 @@ def context(state,source):
     profile=state.get('profile',{});intake=profile.get('intake',{})
     pending=state.get('pending_question')
     return {'source_message_id':source['id'],'lecture':source['text'],'objective':source.get('objective','以授课原文为准'),
+            'school_context':state.get('school_context'),
             'student_self_report':{'background':profile.get('background','尚未了解'),
                 **{k:intake[k] for k in ('stage','grade','background') if k in intake}},
             'pending_question':{k:pending[k] for k in ('question','objective') if k in pending} if pending else None}

@@ -8,7 +8,7 @@ const base=process.env.PLAIN_TEST_URL||'http://127.0.0.1:8012';
  const context=await browser.newContext({viewport:{width:1600,height:1100},reducedMotion:'reduce'});
  const page=await context.newPage(),errors=[];page.on('pageerror',error=>errors.push(error.message));
  const output=path.resolve(__dirname,'../.verification');
- async function start(){await page.goto(base);await page.getByRole('button',{name:'想边聊边说？直接聊天'}).click();await page.getByRole('combobox',{name:'对话对象'}).selectOption('lecturer');}
+ async function start(){await page.goto(base);await page.getByRole('button',{name:'直接开始小课'}).click();await page.getByRole('button',{name:'想边聊边说？直接聊天'}).click();await page.getByRole('combobox',{name:'对话对象'}).selectOption('lecturer');}
  async function send(text){await page.getByRole('textbox',{name:'聊天消息'}).fill(text);await page.getByRole('button',{name:'发送',exact:true}).click();}
  async function credential(){return page.evaluate(()=>JSON.parse(localStorage.getItem('aiteacher.chat.sessions.v1'))[0]);}
  const latest=()=>page.locator('.annotated-lecture').last();

@@ -93,9 +93,15 @@ def metered(function):
     return wrapped
 
 
-def summary(session_id):
+def summary(session_id=None,*,course_id=None):
     db=connect()
-    try:records=[json.loads(row[0]) for row in db.execute('SELECT record FROM model_calls WHERE session_id=? ORDER BY rowid',(session_id,))]
+    try:
+        if course_id is not None:
+            rows=db.execute("SELECT record FROM model_calls WHERE json_extract(record,'$.course_id')=? ORDER BY rowid",(course_id,))
+        elif session_id is not None:
+            rows=db.execute('SELECT record FROM model_calls WHERE session_id=? ORDER BY rowid',(session_id,))
+        else:raise ValueError('A session or course scope is required.')
+        records=[json.loads(row[0]) for row in rows]
     finally:db.close()
     costs={}
     for record in records:

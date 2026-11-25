@@ -47,6 +47,19 @@ function highlightText(text:string,start:number,annotations:TextAnnotation[]){
  return points.slice(0,-1).map((point,index)=><React.Fragment key={point}>{highlightOpaque(text.slice(point-start,points[index+1]-start),point,points[index+1],matches)}</React.Fragment>);
 }
 
+// Some model responses escape line breaks a second time inside tool arguments.
+// Decode only standalone prose escapes, after code/math have been tokenized.
+// Keep raw source offsets so quote annotations still point to the right words.
+function proseText(text:string,start:number,annotations:TextAnnotation[]){
+ const breaks=Array.from(text.matchAll(/(?<!\\)\\(?:r\\n|n)(?![a-zA-Z])/g));
+ if(!breaks.length)return highlightText(text,start,annotations);
+ let cursor=0;
+ return <>{breaks.map(match=>{
+  const index=match.index!,before=cursor;cursor=index+match[0].length;
+  return <React.Fragment key={index}>{highlightText(text.slice(before,index),start+before,annotations)}{highlightOpaque('\n',start+index,start+cursor,annotations)}</React.Fragment>;
+ })}{highlightText(text.slice(cursor),start+cursor,annotations)}</>;
+}
+
 // Only KaTeX-generated HTML is inserted. Model HTML remains escaped React text.
 export default function RichText({text,annotations=[],sourceOffset=0}:{text:string;annotations?:TextAnnotation[];sourceOffset?:number}){
  const parts=text.split(/(```[\s\S]*?```|`[^`\n]+`|\$\$[\s\S]+?\$\$|\\{1,2}\[[\s\S]+?\\{1,2}\]|\\{1,2}\([\s\S]+?\\{1,2}\)|(?<![\\$])\$(?!\$)[^$\n]+?(?<!\\)\$(?![\d$])|\*\*[\s\S]+?\*\*)/g);
@@ -71,6 +84,6 @@ export default function RichText({text,annotations=[],sourceOffset=0}:{text:stri
   const math=mathToken(part);
   if(math)return wrap(<Formula source={part} {...math}/>,math.display);
   if(part.startsWith('**')&&part.endsWith('**'))return <strong key={i}><RichText text={part.slice(2,-2)} annotations={annotations} sourceOffset={start+2}/></strong>;
-  return <React.Fragment key={i}>{highlightText(part,start,annotations)}</React.Fragment>;
+  return <React.Fragment key={i}>{proseText(part,start,annotations)}</React.Fragment>;
  })}</>;
 }

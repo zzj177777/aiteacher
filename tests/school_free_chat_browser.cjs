@@ -1,0 +1,78 @@
+// Run against tests/course_library_fixture.py on port 8017; no real model calls.
+const assert=require('node:assert/strict'),path=require('node:path'),fs=require('node:fs');
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE_PATH||'D:/vibe coding/DeepTutor/web/node_modules/playwright');
+const base=process.env.SCHOOL_CHAT_TEST_URL||'http://127.0.0.1:8017',out=path.resolve(__dirname,'../.verification');
+fs.mkdirSync(out,{recursive:true});
+(async()=>{
+ const browser=await chromium.launch({channel:'msedge',headless:true});
+ try{
+  const page=await browser.newPage({viewport:{width:1440,height:1080},reducedMotion:'reduce'}),errors=[];
+  page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(base);await page.getByRole('button',{name:'进入小学数学',exact:true}).click();
+  await page.getByRole('heading',{name:'小学数学',exact:true}).waitFor();
+  assert.equal(await page.locator('.school-grade-card').count(),6);
+  await page.screenshot({path:path.join(out,'school-free-entry-desktop.png'),fullPage:true});
+  await page.getByRole('button',{name:'自由开始学习',exact:true}).click();
+  await page.getByRole('region',{name:'课堂对话'}).waitFor();
+  assert.equal(await page.getByRole('textbox',{name:'你想学什么？',exact:true}).count(),0);
+  await page.getByText('这里是小学数学。你想学哪一块？直接告诉我就好；没想好，也可以让我给你几个小课方向。',{exact:true}).waitFor();
+  const nav=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('aiteacher.learning.navigation.v1')));
+  const firstId=(await nav()).session_id;
+  assert.equal((await nav()).return_view,'school');
+  await page.getByRole('textbox',{name:'聊天消息',exact:true}).fill('我想学分数的意义');
+  await page.getByRole('button',{name:'发送',exact:true}).click();
+  await page.getByText('我们先用两个小步骤学习分数的意义，确认后开始。',{exact:true}).waitFor();
+  assert.equal(await page.locator('.school-topic-choices button').count(),0);
+  await page.getByRole('button',{name:'按这个计划开始',exact:true}).click();
+  await page.getByText('把一个整体平均分成几份，分数就能表示其中的一份或几份。',{exact:true}).waitFor();
+  await page.getByRole('textbox',{name:'聊天消息',exact:true}).fill('我想学英语语法');
+  await page.getByRole('button',{name:'发送',exact:true}).click();
+  await page.getByRole('alert').filter({hasText:'超出了'}).waitFor();
+  await page.getByRole('textbox',{name:'聊天消息',exact:true}).fill('');
+  await page.getByRole('button',{name:'新学习会话',exact:true}).click();
+  await page.getByRole('button',{name:'还没想好，给我几个选项',exact:true}).waitFor();
+  assert.notEqual((await nav()).session_id,firstId);
+  const secondId=(await nav()).session_id;
+  await page.getByRole('textbox',{name:'聊天消息',exact:true}).fill('我不知道学什么');
+  await page.getByRole('button',{name:'发送',exact:true}).click();
+  await page.getByRole('button',{name:'选择小课：分数的意义',exact:true}).waitFor();
+  assert.equal(await page.locator('.school-topic-choices button').count(),3);
+  assert.equal(await page.locator('.learning-route').count(),0);
+  await page.reload();await page.getByRole('button',{name:'选择小课：分数的意义',exact:true}).waitFor();
+  assert.equal((await nav()).session_id,secondId);
+  await page.screenshot({path:path.join(out,'school-topic-choices-desktop.png'),fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  const choicesLayout=await page.locator('.school-topic-choices button').evaluateAll(nodes=>nodes.map(node=>({top:node.getBoundingClientRect().top,width:node.getBoundingClientRect().width})));
+  assert.ok(choicesLayout.every(box=>box.width>200));
+  assert.ok(choicesLayout[1].top>choicesLayout[0].top);
+  await page.screenshot({path:path.join(out,'school-topic-choices-mobile.png'),fullPage:true});
+  await page.getByRole('button',{name:'选择小课：分数的意义',exact:true}).click();
+  await page.getByText('我们先用两个小步骤学习分数的意义，确认后开始。',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'选择小课：分数的意义',exact:true}).isDisabled(),true);
+  await page.getByRole('button',{name:'← 返回科目',exact:true}).click();
+  await page.getByRole('heading',{name:'小学数学',exact:true}).waitFor();
+  await page.getByRole('region',{name:'这个科目的自由小课'}).waitFor();
+  assert.equal(await page.locator('.school-recent-lessons>div:last-child>button').count(),2);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await page.screenshot({path:path.join(out,'school-free-entry-mobile.png'),fullPage:true});
+  await page.locator('.school-recent-lessons>div:last-child>button').first().click();
+  await page.getByRole('region',{name:'课堂对话'}).waitFor();
+  assert.equal((await nav()).session_id,secondId);
+  await page.getByRole('button',{name:'← 返回科目',exact:true}).click();
+  await page.locator('.school-catalog-header').getByRole('button',{name:'全部科目',exact:true}).click();
+  await page.locator('[data-stage-id="junior"]').click();
+  await page.getByRole('button',{name:'进入初中物理',exact:true}).click();
+  assert.equal(await page.locator('.school-recent-lessons').count(),0);
+  await page.getByRole('button',{name:'自由开始学习',exact:true}).click();
+  await page.getByRole('button',{name:'还没想好，给我几个选项',exact:true}).click();
+  await page.getByRole('button',{name:'选择小课：力的作用',exact:true}).waitFor();
+  assert.ok((await page.getByLabel('本次小课的学段和科目').innerText()).includes('初中'));
+  const observed=await (await page.request.get(base+'/_observed_school')).json();
+  for(const expected of [{stage_id:'primary',subject_id:'math'},{stage_id:'junior',subject_id:'physics'}]){
+   assert.ok(observed.some(r=>r.tool==='suggest_learning_topics'&&r.school_context?.stage_id===expected.stage_id&&r.school_context?.subject_id===expected.subject_id));
+  }
+  assert.deepEqual(errors,[]);
+  console.log('PASS: subject free-chat entry, known topic, unknown topic/button choices, plan/lecture, fixed subject scope, no intake form, new session context, refresh, stale choice disabled, recent lessons/resume, subject isolation, mobile. All model calls local.');
+ }finally{await browser.close();}
+})().catch(e=>{console.error(e);process.exitCode=1;});

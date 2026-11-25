@@ -20,8 +20,9 @@ from .lesson import new_state, public_state, apply_event
 from .tutor import configured, remote_answer, complete, ROOT
 from .lecturer import current_task, remote_lecture
 from .teaching_session import context_key, question_answered, settle_generation, upgrade_legacy
-from . import planner, chat_classroom, usage, model_debug, plain_language
+from . import planner, chat_classroom, usage, model_debug, plain_language, courses, course_scope, curriculum, materials
 from .errors import TeachingError, diagnostic, failure_text
+from . import school_learning, digital_human, digital_board
 
 DB_PATH = Path(os.environ.get("AITEACHER_DB", str(ROOT / "data" / "classroom.sqlite3")))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -44,8 +45,10 @@ with connect() as db:
     CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY, token_hash TEXT NOT NULL, state TEXT NOT NULL, created_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS events(session_id TEXT NOT NULL, event_key TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL, response TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(session_id,event_key));
     """)
+    courses.initialize(db)
 
 app = FastAPI(title="AI 私教 · 聊天实验室", version="0.2.0")
+app.include_router(materials.router)
 
 
 class Event(BaseModel):
@@ -57,6 +60,9 @@ class Event(BaseModel):
 
 class CreateSession(BaseModel):
     mode: str = Field(default="classic", pattern="^(classic|planner|chat)$")
+    course_id: str | None = Field(default=None, min_length=1, max_length=100)
+    title: str = Field(default='', max_length=200)
+    school_context: school_learning.SchoolSelection | None = None
 
 
 class ExplainSelection(BaseModel):
@@ -80,9 +86,11 @@ def token_value(authorization: str = Header(default="")):
 
 def read_session(db, sid, token):
     row = db.execute("SELECT * FROM sessions WHERE id=?", (sid,)).fetchone()
-    if not row or not secrets.compare_digest(row["token_hash"], hashlib.sha256(token.encode()).hexdigest()):
+    if not row or not (secrets.compare_digest(row["token_hash"], hashlib.sha256(token.encode()).hexdigest()) or courses.can_access_session(db, sid, token)):
         raise HTTPException(404, "课堂不存在或恢复凭据无效。")
     state = json.loads(row["state"])
+    state['course'] = courses.session_course(db, sid)
+    state['section'] = curriculum.section_context(db, sid)
     if (chat_classroom.ensure_outline(state) if state.get('mode')=='chat' else upgrade_legacy(state)):
         db.execute("UPDATE sessions SET state=? WHERE id=?", (json.dumps(state, ensure_ascii=False), sid))
     return state
@@ -98,14 +106,37 @@ def health():
 
 
 @app.post("/api/sessions")
-def create_session(body: CreateSession = CreateSession()):
+def create_session(body: CreateSession = CreateSession(), authorization: str = Header(default='')):
     sid, token = str(uuid4()), secrets.token_urlsafe(32)
-    state = chat_classroom.new_state() if body.mode == 'chat' else new_state()
+    checked_course = None
+    if body.school_context and (body.mode!='chat' or body.course_id):
+        raise HTTPException(422,'学科自由小课仅支持独立聊天课堂，不能同时绑定长期课程。')
+    if body.course_id:
+        if body.mode!='chat':
+            raise HTTPException(422,'课程管理仅支持聊天课堂。')
+        with LOCK, connect() as db:
+            lid=courses.library(db,token_value(authorization))
+            checked_course=courses.course(db,body.course_id,lid)
+        course_scope.check(checked_course,body.title,session_id=sid,kind='title')
+    state = chat_classroom.new_state(body.school_context.context() if body.school_context else None) if body.mode == 'chat' else new_state()
     if body.mode == "planner":
         state["messages"] = []
         planner.initialize(state,onboarding=True)
     with LOCK, connect() as db:
+        lid = None
+        if authorization or body.course_id:
+            if body.mode != 'chat':
+                raise HTTPException(422, '课程管理仅支持聊天课堂。')
+            lid = courses.library(db, token_value(authorization))
+            if body.course_id:
+                current_course=courses.course(db, body.course_id, lid)
+                if course_scope.signature(current_course)!=course_scope.signature(checked_course):
+                    raise HTTPException(409,'课程信息已更新，请重新提交。')
         db.execute("INSERT INTO sessions VALUES(?,?,?,?)", (sid, hashlib.sha256(token.encode()).hexdigest(), json.dumps(state, ensure_ascii=False), now()))
+        if lid:
+            title=(state['school_context']['stage_label']+state['school_context']['subject_label']+' · 自由小课') if state.get('school_context') else body.title.strip()
+            courses.attach(db, sid, lid, body.course_id, title)
+            state['course'] = courses.session_course(db, sid)
     return {"session_id": sid, "token": token, **envelope(state)}
 
 
@@ -113,6 +144,11 @@ def create_session(body: CreateSession = CreateSession()):
 def get_session(sid: str, token=Depends(token_value)):
     with LOCK, connect() as db:
         return envelope(read_session(db, sid, token))
+
+
+courses.register_routes(app, connect, LOCK, token_value)
+digital_human.register_routes(app, connect, LOCK, read_session, token_value)
+digital_board.register_routes(app, connect, LOCK, read_session, token_value)
 
 
 def enrich_message(sid, revision, message_id, question, context):
@@ -256,10 +292,14 @@ def run_plain_language(sid,record_id,data,job_id=None):
         logging.getLogger(__name__).error('plain_language_storage_failed record_id=%s',record_id)
 
 
+curriculum.register_routes(app, connect, LOCK, token_value, read_session, envelope, run_chat)
+
+
 @app.on_event("startup")
 def recover_interrupted_generations():
     # Background work cannot survive a process restart. Keep the saved local
     # lecture usable rather than leaving the student waiting indefinitely.
+    with LOCK, connect() as db:curriculum.recover(db)
     try:plain_language.recover()
     except Exception:logging.getLogger(__name__).error('plain_language_recovery_failed')
     with LOCK, connect() as db:
@@ -300,6 +340,28 @@ def recover_interrupted_generations():
 def event(sid: str, body: Event, background: BackgroundTasks, token=Depends(token_value)):
     if len(json.dumps(body.payload, ensure_ascii=False)) > 15000:
         raise HTTPException(413, "提交内容过长。")
+    checked_signature = None
+    if body.type in ('chat_intake','chat_message','chat_choose_topic'):
+        with LOCK, connect() as db:
+            inspected=read_session(db,sid,token)
+            previous=db.execute('SELECT response FROM events WHERE session_id=? AND event_key=?',(sid,body.idempotency_key)).fetchone()
+            if previous:
+                return {**envelope(inspected),'result':json.loads(previous['response']),'duplicate':True}
+            if body.expected_revision!=inspected['revision']:
+                raise HTTPException(409,'课堂已更新，已为你重新加载，请再次提交。')
+            checked_signature=course_scope.signature(school_learning.scope(inspected))
+        if school_learning.scope(inspected):
+            if body.type=='chat_intake':
+                try: topic=chat_classroom.validate_intake(body.payload)['topic']
+                except ValueError as exc: raise HTTPException(422,str(exc)) from None
+            elif body.type=='chat_choose_topic':
+                topic=next((c['title'] for c in inspected.get('topic_choices',[]) if c['id']==body.payload.get('choice_id')),'')
+            else:topic=body.payload.get('text')
+            if inspected.get('school_context') and school_learning.wants_suggestions(topic) and not inspected.get('plan'):
+                topic=''
+            if isinstance(topic,str) and 0<len(topic)<=4000:
+                course_scope.check(school_learning.scope(inspected),topic,session_id=sid,
+                    context=course_scope.message_context(inspected),kind='topic' if body.type=='chat_intake' else 'message')
     with LOCK, connect() as db:
         state = read_session(db, sid, token)
         previous = db.execute("SELECT response FROM events WHERE session_id=? AND event_key=?", (sid, body.idempotency_key)).fetchone()
@@ -308,6 +370,8 @@ def event(sid: str, body: Event, background: BackgroundTasks, token=Depends(toke
             return {**envelope(state), "result": json.loads(previous["response"]), "duplicate": True}
         if body.expected_revision != state["revision"]:
             raise HTTPException(409, "课堂已更新，已为你重新加载，请再次提交。")
+        if body.type in ('chat_intake','chat_message','chat_choose_topic') and course_scope.signature(school_learning.scope(state))!=checked_signature:
+            raise HTTPException(409,'小课所属课程已更新，请重新提交。')
         count = db.execute("SELECT COUNT(*) FROM events WHERE session_id=?", (sid,)).fetchone()[0]
         if count >= 500:
             raise HTTPException(422, "本次课堂操作较多，请开始新的学习会话。")
@@ -352,6 +416,7 @@ def explain_selection(sid: str, body: ExplainSelection, token=Depends(token_valu
         selected=body.text.strip()
         if not selected: raise HTTPException(422,'请先选择一个词或一句话。')
         data={'selected_text':selected,'source_passage':source['text'][:8000],
+              'school_context':state.get('school_context'),
               'learning_goal':state['profile']['goal'],
               'current_node':(chat_classroom.current_node(state) or {}).get('title'),
               'nearby_dialogue':[{'agent':m['agent'],'text':m['text'][:1500]} for m in state['messages'][max(0,state['messages'].index(source)-2):state['messages'].index(source)]]}
@@ -419,6 +484,7 @@ if DIST.exists():
 
 
 @app.get("/")
+@app.get("/digital-classroom")
 def index():
     if not (DIST / "index.html").exists():
         raise HTTPException(503, "请先运行 npm run build，或打开 Vite 开发页面。")

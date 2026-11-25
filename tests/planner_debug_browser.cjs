@@ -11,6 +11,7 @@ const base=process.env.DEBUG_TEST_URL||'http://127.0.0.1:8012';
   const panel=page.locator('.debug-inline-content').first();
   try{
     await page.goto(base);
+    await page.getByRole('button',{name:'直接开始小课'}).click();
     await page.getByRole('button',{name:'想边聊边说？直接聊天'}).click();
     await panel.getByText('还没有记录。',{exact:false}).waitFor();
     await page.getByRole('textbox',{name:'聊天消息'}).fill('我是初学者，想学习分数');
@@ -50,7 +51,8 @@ const base=process.env.DEBUG_TEST_URL||'http://127.0.0.1:8012';
     await page.screenshot({path:path.join(output,'debug-mobile.png'),fullPage:true});
     await dialog.getByRole('button',{name:'关闭调试大窗'}).click();
     // Switch to the first session; failed content from the second must disappear.
-    await page.getByRole('combobox',{name:'恢复学习会话'}).selectOption(firstCredential.session_id);
+    await page.getByRole('button',{name:'课程管理'}).click();
+    await page.locator(`[data-session-id="${firstCredential.session_id}"] .lesson-open`).click();
     await panel.locator('.debug-state').filter({hasText:'调用完成'}).waitFor();
     await panel.getByRole('button',{name:'模型原始回复',exact:true}).click();
     assert.equal(await panel.getByText('{invalid original tool arguments',{exact:true}).count(),0);

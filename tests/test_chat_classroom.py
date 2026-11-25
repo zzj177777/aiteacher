@@ -194,6 +194,7 @@ class ChatWorkerTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory();self.db=patch.object(server,'DB_PATH',Path(self.temp.name)/'test.sqlite3');self.db.start()
         with server.connect() as db:
             db.executescript('CREATE TABLE sessions(id TEXT PRIMARY KEY,token_hash TEXT,state TEXT,created_at TEXT); CREATE TABLE events(session_id TEXT,event_key TEXT,kind TEXT,payload TEXT,response TEXT,created_at TEXT,PRIMARY KEY(session_id,event_key));')
+            server.courses.initialize(db)
         self.state=chat.new_state();chat.event(self.state,'chat_message',dict(text='学习积分'))
         self.save(self.state)
 

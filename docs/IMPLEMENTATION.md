@@ -1,12 +1,12 @@
 # 当前系统说明
 
-维护日期：2026-10-30。以下说明当前默认入口，历史文档不覆盖本文和通用协议。
+维护日期：2026-11-25。以下说明当前默认入口，历史文档不覆盖本文和通用协议。
 
 ## 三种模式
 
 | mode | 入口与实现 | 教学与测评 |
 | --- | --- | --- |
-| chat | 默认网页 ChatApp；后端 chat_classroom.py | 模型生成任意课题计划/讲授/测评，结果未经过通用核验 |
+| chat | 默认网页 CourseLibrary → ChatApp；后端 courses.py + chat_classroom.py | 长期课程归档独立聊天小课；模型生成任意课题计划/讲授/测评，结果未经过通用核验 |
 | classic | API 不传 mode 时的兼容默认值；lesson.py | 预设行列式课程，Fraction 精确验证与确定规则 |
 | planner | API 显式创建；planner.py + 旧课堂 | 模型提出受限工具调用，只有行列式课程可执行 |
 
@@ -14,7 +14,9 @@
 
 ## 当前链路
 
-React ChatApp → FastAPI 事件接口 → chat_classroom → 教学安排/专项 Agent → tutor 模型适配器 → SQLite 原子保存。模型请求在锁外；按 job id 判断过期后提交。SSE、可主动取消的网络请求、持久任务队列尚未实现。
+React CourseLibrary → 课程目录/历史小课恢复 → ChatApp → FastAPI 事件接口 → chat_classroom → 教学安排/专项 Agent → tutor 模型适配器 → SQLite 原子保存。模型请求在锁外；按 job id 判断过期后提交。SSE、可主动取消的网络请求、持久任务队列尚未实现。
+
+长期课程通过 curriculum.py 生成有序小节卡片，每节固定绑定一个 chat session，进入后由安排 Agent 再规划节内节点。旧浏览器会话可导入并归类为补充小课。目录、小节与已关联小课按匿名空间令牌鉴权，原 session 令牌仍有效。大课输入与小节目标进入教学背景，但不自动形成跨小节认知档案。详见 [COURSE_MANAGEMENT.md](COURSE_MANAGEMENT.md)、[COURSE_CURRICULUM.md](COURSE_CURRICULUM.md)。
 
 新学习默认先展示初始化卡片，收集学习主题、目标与阶段，并按目标展开教材/考试补充项。`chat_intake` 事件将结构化自述持久化为 `profile.intake`，交给安排 Agent 形成初步计划或追问，首次不会直接讲课/测评。用户可以跳过卡片直接聊天；旧会话继续恢复。详细字段与边界见通用 Agent 协议中的初始化卡片章节。
 

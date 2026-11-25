@@ -78,10 +78,10 @@ def complete(system, data, max_tokens=1024):
 
 
 @usage.metered
-def call_tool(system, data, tools):
+def call_tool(system, data, tools, max_tokens=2000):
     if not configured():
         raise TeachingError("configuration", "model_unavailable", "模型连接配置不完整。")
-    body = {"model": os.environ["AI_MODEL"], "messages": [{"role":"system", "content":system}, {"role":"user", "content":json.dumps(data, ensure_ascii=False)}], "tools":tools, "tool_choice":"required", "temperature":0.2, "max_tokens":2000, "stream":False}
+    body = {"model": os.environ["AI_MODEL"], "messages": [{"role":"system", "content":system}, {"role":"user", "content":json.dumps(data, ensure_ascii=False)}], "tools":tools, "tool_choice":"required", "temperature":0.2, "max_tokens":max_tokens, "stream":False}
     result = request_completion(body)
     choice = response_choice(result)
     calls = choice["message"].get("tool_calls", [])
