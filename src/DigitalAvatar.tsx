@@ -2,7 +2,7 @@ import {useEffect,useRef,useState,type MutableRefObject} from 'react';
 import type {Live2DModel,Cubism4InternalModel} from 'pixi-live2d-display/cubism4';
 
 export type DigitalCharacter={id:string;name:string;mode:'live2d'|'portrait';available:boolean;description:string;model_url?:string;portrait_url?:string;mouth_parameter?:string;note?:string;credit:string;source_url:string};
-export const defaultCharacter:DigitalCharacter={id:'mao',name:'Mao',mode:'live2d',available:true,description:'魔法少女 · 动态形象',model_url:'/digital-assets/characters/mao/mao_pro.model3.json',credit:'Sample model © Live2D Inc.',source_url:'https://www.live2d.com/en/learn/sample/'};
+export const defaultCharacter:DigitalCharacter={id:'mao',name:'Mao',mode:'live2d',available:true,description:'魔法少女 · 动态形象',model_url:'/digital-assets/characters/mao/mao_pro.model3.json',mouth_parameter:'ParamA',credit:'Sample model © Live2D Inc.',source_url:'https://www.live2d.com/en/learn/sample/'};
 
 let coreLoading:Promise<void>|undefined;
 function loadCore(){
@@ -39,7 +39,7 @@ export default function DigitalAvatar({mouth,speaking,character=defaultCharacter
     const w=container.clientWidth,h=container.clientHeight;
     app.renderer.resize(w,h);model!.scale.set(Math.min(w/width,h/height)*.96);model!.position.set(w*.5,h*.99);
    };
-   model.internalModel.on('beforeModelUpdate',()=>{model!.internalModel.coreModel.setParameterValueById(character.mouth_parameter||'ParamMouthOpenY',mouth.current);});
+   model.internalModel.on('beforeModelUpdate',()=>{model!.internalModel.coreModel.setParameterValueById(character.mouth_parameter||(character.id==='mao'?'ParamA':'ParamMouthOpenY'),mouth.current);});
    observer=new ResizeObserver(fit);observer.observe(container);fit();setReady(true);
   }catch(e){dispose?.();dispose=undefined;if(alive)setError((e as Error).message||'角色未能加载');}})();
   return()=>{alive=false;dispose?.();};
