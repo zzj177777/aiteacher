@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 import socket
 from contextlib import contextmanager
 from pathlib import Path
@@ -19,6 +20,8 @@ from backend import digital_human as dh
 
 class DigitalHumanTests(unittest.TestCase):
     def setUp(self):
+        env = patch.dict(os.environ, {'TTS_DEFAULT_VOICE': 'edge-xiaoxiao'})
+        env.start(); self.addCleanup(env.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -114,6 +117,13 @@ class DigitalHumanTests(unittest.TestCase):
         self.assertEqual(self.state, self.before)
         self.assertEqual(self.speech(chunk=301).status_code, 422)
         self.assertEqual(self.speech(chunk=2).status_code, 422)
+
+    def test_selected_voice_is_forwarded_without_session_changes(self):
+        with patch.object(dh, 'synthesize', return_value=b'audio') as synth:
+            response = self.speech(voice_id='doubao-xionger')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(synth.call_args.args[1], 'doubao-xionger')
+        self.assertEqual(self.state, self.before)
 
     def test_assets_do_not_expose_arbitrary_files(self):
         (self.root / '.env').write_text('secret')

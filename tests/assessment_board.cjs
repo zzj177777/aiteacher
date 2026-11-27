@@ -1,0 +1,11 @@
+const assert=require('node:assert/strict'),React=require('react'),{renderToStaticMarkup}=require('react-dom/server');
+const Board=require('./load_ts.cjs')('src/AssessmentBoard.tsx',{'./whiteboard.css':{},'./step-board.css':{}}).default;
+const props={question:{id:'q-owned',question:'$2+3$ 等于多少？\nA. 4\nB. 5\nC. 6',objective:'检查加法'},messageId:'assessment-message',introduction:'请选择一个答案。',disabled:false,onAnswer(){},onHelp(){},onReplay(){}};
+const html=renderToStaticMarkup(React.createElement(Board,props));
+assert.match(html,/测评 Agent/);assert.match(html,/aria-label="测评 Agent 白板"/);assert.match(html,/data-message-id="assessment-message"/);
+assert.equal((html.match(/type="radio"/g)||[]).length,3);assert.ok(html.includes('class="katex"'));
+assert.ok(!html.includes('rubric'));assert.ok(html.includes('交给测评 Agent 检查'));
+const open=renderToStaticMarkup(React.createElement(Board,{...props,question:{id:'q-open',question:'说说系数表示什么'}}));
+assert.match(open,/aria-label="测评 Agent 题目回答"/);assert.ok(!open.includes('type="radio"'));
+const busy=renderToStaticMarkup(React.createElement(Board,{...props,disabled:true}));assert.match(busy,/<fieldset[^>]*disabled/);assert.ok(busy.includes('正在处理'));
+console.log('Assessment whiteboard verified: independent identity, canonical question, clickable choices, formula rendering, open answers and busy guard.');

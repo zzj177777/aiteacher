@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from .tutor import ROOT
 from .math_speech import spoken_math_text
+from .speech_providers import default_voice, resolve_voice, voice_catalog, doubao_synthesize
 
 HOME = Path(os.environ.get('DIGITAL_HUMAN_HOME', str(ROOT.parent / 'Open-LLM-VTuber')))
 PYTHON = Path(os.environ.get('DIGITAL_HUMAN_PYTHON', str(HOME / '.venv' / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python'))))
@@ -24,6 +25,8 @@ _cache_lock = threading.Lock()
 _cache = OrderedDict()
 _cache_bytes = 0
 _cache_limit = 16 * 1024 * 1024
+_timed_cache = OrderedDict()
+_timed_bytes = 0
 
 
 def character_catalog():
@@ -50,6 +53,7 @@ def character_catalog():
 class SpeechRequest(BaseModel):
     message_id: str = Field(min_length=1, max_length=100)
     chunk: int = Field(default=0, ge=0, le=300)
+    voice_id: str | None = Field(default=None, max_length=80)
 
 
 def speech_chunks(text):
@@ -72,24 +76,28 @@ def speech_chunks(text):
     return [chunk for chunk in chunks if chunk]
 
 
-def synthesize(text):
+def synthesize(text, voice_id=None):
     global _cache_bytes
-    key = hashlib.sha256(('zh-CN-XiaoxiaoNeural\0' + text).encode()).digest()
+    voice = resolve_voice(voice_id)
+    key = hashlib.sha256((repr(sorted(voice.items())) + '\0' + text).encode()).digest()
     with _cache_lock:
         if key in _cache:
             _cache.move_to_end(key)
             return _cache[key]
-    if not PYTHON.is_file():
+    if voice['provider'] == 'edge' and not PYTHON.is_file():
         raise HTTPException(503, '数字人语音环境未安装，板书仍可正常学习。')
     if not _slots.acquire(blocking=False):
         raise HTTPException(429, '语音正在生成，请稍后重试。')
     try:
-        result = subprocess.run([str(PYTHON), str(Path(__file__).with_name('digital_human_speech.py'))],
-            input=text.encode('utf-8'), stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=40,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
-        if result.returncode or len(result.stdout) < 100:
-            raise HTTPException(502, '中文配音暂时不可用，可以继续看板书，或点击重听再试。')
-        audio = result.stdout
+        if voice['provider'] == 'doubao':
+            audio = doubao_synthesize(text, voice)
+        else:
+            result = subprocess.run([str(PYTHON), str(Path(__file__).with_name('digital_human_speech.py'))],
+                input=text.encode('utf-8'), stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=40,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            if result.returncode or len(result.stdout) < 100:
+                raise HTTPException(502, '中文配音暂时不可用，可以继续看板书，或点击重听再试。')
+            audio = result.stdout
         with _cache_lock:
             if key not in _cache:
                 _cache[key] = audio; _cache_bytes += len(audio)
@@ -102,15 +110,44 @@ def synthesize(text):
         _slots.release()
 
 
+def synthesize_timed(text, voice_id=None):
+    """Keep audio and its timestamps in the same cache entry; never mix voices."""
+    global _timed_bytes
+    voice = resolve_voice(voice_id)
+    if voice['provider'] != 'doubao':
+        return {'audio': synthesize(text, voice_id), 'words': []}
+    key = hashlib.sha256((repr(sorted(voice.items())) + '\0' + text).encode()).digest()
+    with _cache_lock:
+        if key in _timed_cache:
+            _timed_cache.move_to_end(key)
+            return _timed_cache[key]
+    if not _slots.acquire(blocking=False): raise HTTPException(429, '语音正在生成，请稍后重试。')
+    try:
+        packet = doubao_synthesize(text, voice, with_timestamps=True)
+        with _cache_lock:
+            if key not in _timed_cache:
+                _timed_cache[key] = packet; _timed_bytes += len(packet['audio'])
+            while _timed_bytes > _cache_limit:
+                _, removed = _timed_cache.popitem(last=False); _timed_bytes -= len(removed['audio'])
+        return packet
+    finally:
+        _slots.release()
+
+
 def register_routes(app, connect, lock, read_session, token_value):
     @app.get('/api/digital-human/characters')
     def characters():
-        return {'characters': character_catalog(), 'voice_note': '角色外观可切换，配音均使用晓晓，不是角色原声。'}
+        return {'characters': character_catalog(), 'voice_note': '老师形象与朗读音色可以分别选择。'}
+
+    @app.get('/api/digital-human/voices')
+    def voices():
+        return voice_catalog(PYTHON.is_file())
 
     @app.get('/api/digital-human/status')
     def status():
         return {'avatar_ready': CORE.is_file() and (MODEL / 'mao_pro.model3.json').is_file(),
-                'speech_ready': PYTHON.is_file(), 'character': 'Mao',
+                'speech_ready': any(v['available'] for v in voice_catalog(PYTHON.is_file())['voices']),
+                'default_voice': default_voice(), 'character': 'Mao',
                 'model_url': '/digital-assets/models/mao_pro.model3.json'}
 
     @app.get('/digital-assets/core.js')
@@ -152,5 +189,5 @@ def register_routes(app, connect, lock, read_session, token_value):
             chunks = speech_chunks(message['text'])
         if body.chunk >= len(chunks): raise HTTPException(422, '该段语音不存在。')
         # Synthesis happens outside the teaching/database lock. No session writes.
-        return Response(synthesize(chunks[body.chunk]), media_type='audio/mpeg',
+        return Response(synthesize(chunks[body.chunk], body.voice_id) if body.voice_id else synthesize(chunks[body.chunk]), media_type='audio/mpeg',
                         headers={'X-Speech-Chunks': str(len(chunks)), 'Cache-Control': 'no-store'})

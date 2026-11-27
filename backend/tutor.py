@@ -78,11 +78,11 @@ def complete(system, data, max_tokens=1024):
 
 
 @usage.metered
-def call_tool(system, data, tools, max_tokens=2000):
+def call_tool(system, data, tools, max_tokens=2000, *, model=None, timeout=None):
     if not configured():
         raise TeachingError("configuration", "model_unavailable", "模型连接配置不完整。")
-    body = {"model": os.environ["AI_MODEL"], "messages": [{"role":"system", "content":system}, {"role":"user", "content":json.dumps(data, ensure_ascii=False)}], "tools":tools, "tool_choice":"required", "temperature":0.2, "max_tokens":max_tokens, "stream":False}
-    result = request_completion(body)
+    body = {"model": model or os.environ["AI_MODEL"], "messages": [{"role":"system", "content":system}, {"role":"user", "content":json.dumps(data, ensure_ascii=False)}], "tools":tools, "tool_choice":"required", "temperature":0.2, "max_tokens":max_tokens, "stream":False}
+    result = request_completion(body) if timeout is None else request_completion(body, timeout=timeout)
     choice = response_choice(result)
     calls = choice["message"].get("tool_calls", [])
     if not isinstance(calls,list):
@@ -116,7 +116,7 @@ def response_choice(result):
     return choice
 
 
-def request_completion(body):
+def request_completion(body, *, timeout=45):
     # DeepSeek's thinking mode can spend the short tutoring budget on reasoning
     # without returning visible content. Use non-thinking mode for live Q&A.
     if not configured():
@@ -126,14 +126,14 @@ def request_completion(body):
     req = Request(os.environ["AI_API_URL"], data=json.dumps(body).encode(), headers={"Content-Type": "application/json", "Authorization": "Bearer " + os.environ["AI_API_KEY"]})
     model_debug.capture_request(body)
     try:
-        with urlopen(req, timeout=45) as response:
+        with urlopen(req, timeout=timeout) as response:
             result = json.loads(response.read(1000000))
     except HTTPError as exc:
         # Do not log provider bodies/headers: they can contain private content.
         reasons = {401: "模型密钥无效", 402: "模型账户余额不足", 429: "模型调用频率受限"}
         raise TeachingError("provider_request", "http_error", reasons.get(exc.code, f"模型服务返回 HTTP {exc.code}"), http_status=exc.code) from None
     except TimeoutError:
-        raise TeachingError("provider_request", "timeout", "模型服务请求超时（45秒）。") from None
+        raise TeachingError("provider_request", "timeout", f"模型服务请求超时（{timeout:g}秒）。") from None
     except URLError as exc:
         timed_out=isinstance(exc.reason,TimeoutError)
         raise TeachingError("provider_request", "timeout" if timed_out else "connection_failed", "模型服务请求超时。" if timed_out else "无法连接模型服务。") from None

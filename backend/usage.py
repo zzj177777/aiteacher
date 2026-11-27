@@ -73,7 +73,7 @@ def price(record):
 def metered(function):
     @wraps(function)
     def wrapped(*args,**kwargs):
-        record=dict(id=str(uuid4()),**_scope.get(),model=os.getenv('AI_MODEL','unconfigured'),
+        record=dict(id=str(uuid4()),**_scope.get(),model=kwargs.get('model') or os.getenv('AI_MODEL','unconfigured'),
                     at=datetime.now(timezone.utc).isoformat(),status='completed')
         token=_call.set(record);start=time.monotonic()
         try:return function(*args,**kwargs)

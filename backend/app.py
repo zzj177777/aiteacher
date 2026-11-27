@@ -20,7 +20,7 @@ from .lesson import new_state, public_state, apply_event
 from .tutor import configured, remote_answer, complete, ROOT
 from .lecturer import current_task, remote_lecture
 from .teaching_session import context_key, question_answered, settle_generation, upgrade_legacy
-from . import planner, chat_classroom, usage, model_debug, plain_language, courses, course_scope, curriculum, materials
+from . import planner, chat_classroom, usage, model_debug, plain_language, courses, course_scope, curriculum, materials, teacher_styles
 from .errors import TeachingError, diagnostic, failure_text
 from . import school_learning, digital_human, digital_board
 
@@ -46,6 +46,7 @@ with connect() as db:
     CREATE TABLE IF NOT EXISTS events(session_id TEXT NOT NULL, event_key TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL, response TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(session_id,event_key));
     """)
     courses.initialize(db)
+    teacher_styles.initialize(db)
 
 app = FastAPI(title="AI 私教 · 聊天实验室", version="0.2.0")
 app.include_router(materials.router)
@@ -63,15 +64,27 @@ class CreateSession(BaseModel):
     course_id: str | None = Field(default=None, min_length=1, max_length=100)
     title: str = Field(default='', max_length=200)
     school_context: school_learning.SchoolSelection | None = None
+    teacher_style: str = Field(default=teacher_styles.DEFAULT, max_length=40)
 
 
 class ExplainSelection(BaseModel):
     message_id: str = Field(min_length=1, max_length=100)
     text: str = Field(min_length=1, max_length=2000)
+    board_id: str | None = Field(default=None, min_length=1, max_length=100)
+    step_id: str | None = Field(default=None, min_length=1, max_length=100)
+    detour_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class ExplainLecture(BaseModel):
     message_id: str = Field(min_length=1,max_length=100)
+
+
+class CustomTeacherStyle(BaseModel):
+    model_config = {'extra': 'forbid'}
+    name: str = Field(min_length=1, max_length=80)
+    approach: str = Field(min_length=1, max_length=6000)
+    examples: str = Field(min_length=1, max_length=10000)
+    idempotency_key: str = Field(min_length=8, max_length=100)
 
 
 def now():
@@ -105,8 +118,23 @@ def health():
     return {"status": "ok", "teaching_mode": "ai" if configured() else "local"}
 
 
+@app.get('/api/teacher-styles')
+def list_teacher_styles(teacher_style_token: str = Header(default='', alias='X-Teacher-Style-Token')):
+    with LOCK, connect() as db:
+        return {'default': teacher_styles.DEFAULT, 'styles': teacher_styles.catalog(db, teacher_style_token)}
+
+
+@app.post('/api/teacher-styles', status_code=201)
+def create_teacher_style(body: CustomTeacherStyle, teacher_style_token: str = Header(default='', alias='X-Teacher-Style-Token')):
+    with LOCK, connect() as db:
+        record = teacher_styles.create(db, teacher_style_token, body.name, body.approach, body.examples, body.idempotency_key)
+    return {'style': record}
+
+
 @app.post("/api/sessions")
-def create_session(body: CreateSession = CreateSession(), authorization: str = Header(default='')):
+def create_session(body: CreateSession = CreateSession(), authorization: str = Header(default=''), teacher_style_token: str = Header(default='', alias='X-Teacher-Style-Token')):
+    with LOCK, connect() as db:
+        style_config = teacher_styles.resolve(db, body.teacher_style, teacher_style_token)
     sid, token = str(uuid4()), secrets.token_urlsafe(32)
     checked_course = None
     if body.school_context and (body.mode!='chat' or body.course_id):
@@ -119,6 +147,7 @@ def create_session(body: CreateSession = CreateSession(), authorization: str = H
             checked_course=courses.course(db,body.course_id,lid)
         course_scope.check(checked_course,body.title,session_id=sid,kind='title')
     state = chat_classroom.new_state(body.school_context.context() if body.school_context else None) if body.mode == 'chat' else new_state()
+    if body.mode == 'chat': teacher_styles.apply(state, body.teacher_style, style_config)
     if body.mode == "planner":
         state["messages"] = []
         planner.initialize(state,onboarding=True)
@@ -337,7 +366,7 @@ def recover_interrupted_generations():
 
 
 @app.post("/api/sessions/{sid}/events")
-def event(sid: str, body: Event, background: BackgroundTasks, token=Depends(token_value)):
+def event(sid: str, body: Event, background: BackgroundTasks, token=Depends(token_value), teacher_style_token: str = Header(default='', alias='X-Teacher-Style-Token')):
     if len(json.dumps(body.payload, ensure_ascii=False)) > 15000:
         raise HTTPException(413, "提交内容过长。")
     checked_signature = None
@@ -375,8 +404,9 @@ def event(sid: str, body: Event, background: BackgroundTasks, token=Depends(toke
         count = db.execute("SELECT COUNT(*) FROM events WHERE session_id=?", (sid,)).fetchone()[0]
         if count >= 500:
             raise HTTPException(422, "本次课堂操作较多，请开始新的学习会话。")
+        style_config = teacher_styles.resolve(db, body.payload.get('style_id'), teacher_style_token) if state.get('mode') == 'chat' and body.type == 'chat_teacher_style' else None
         try:
-            result = chat_classroom.event(state, body.type, body.payload) if state.get('mode') == 'chat' else apply_event(state, body.type, body.payload)
+            result = chat_classroom.event(state, body.type, body.payload, style_config=style_config) if state.get('mode') == 'chat' else apply_event(state, body.type, body.payload)
         except (ValueError, TypeError, KeyError, IndexError) as exc:
             raise HTTPException(422, str(exc) if isinstance(exc, ValueError) else "提交格式无效，请检查输入。")
         state["revision"] += 1
@@ -415,11 +445,16 @@ def explain_selection(sid: str, body: ExplainSelection, token=Depends(token_valu
         if not source: raise HTTPException(422,'原文消息不存在，请重新选择。')
         selected=body.text.strip()
         if not selected: raise HTTPException(422,'请先选择一个词或一句话。')
+        if (body.board_id or body.step_id or body.detour_id) and not (body.board_id and body.step_id):
+            raise HTTPException(422,'选中白板的来源信息不完整，请重新选择。')
         data={'selected_text':selected,'source_passage':source['text'][:8000],
               'school_context':state.get('school_context'),
               'learning_goal':state['profile']['goal'],
               'current_node':(chat_classroom.current_node(state) or {}).get('title'),
               'nearby_dialogue':[{'agent':m['agent'],'text':m['text'][:1500]} for m in state['messages'][max(0,state['messages'].index(source)-2):state['messages'].index(source)]]}
+        if body.board_id:
+            data['lecture_context']=data['source_passage']
+            data.update(digital_board.selection_context(db,sid,body.message_id,body.board_id,body.step_id,body.detour_id))
     if not configured(): raise HTTPException(503,'大模型暂未配置，无法生成解释。')
     try:
         with usage.scope(session_id=sid,agent='explainer'):

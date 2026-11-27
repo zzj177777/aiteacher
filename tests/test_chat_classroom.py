@@ -276,3 +276,56 @@ class ChatWorkerTests(unittest.TestCase):
             with self.assertRaises(HTTPException) as error:server.explain_selection('test',body,token='token')
         self.assertEqual(error.exception.status_code,502)
         self.assertNotIn('private provider details',error.exception.detail)
+
+    def board_selection_fixture(self):
+        self.state['messages'].append({'id':'visible-lecture','agent':'lecturer','status':'ai','text':'授课完整上下文。'})
+        self.save(self.state)
+        board={'id':'board','source_message_id':'visible-lecture','status':'completed','result':{'steps':[
+            {'id':'main-step','title':'看系数','board':'系数表示每次变化多少。','narration':'先看相邻输入的差。','question':'系数是2时怎样变化？','rubric':'PRIVATE RUBRIC'},
+            {'id':'future-step','title':'FUTURE CONTENT','board':'FUTURE CONTENT'}]}}
+        detour={'id':'detour','status':'completed','result':{'intro':'先补一个词。','steps':[
+            {'id':'detour-step','title':'什么是系数','board':'系数就是字母前面的乘数。','narration':'比如三倍里的三。'}]}}
+        with server.connect() as db:
+            db.execute('UPDATE sessions SET token_hash=? WHERE id=?',(server.hashlib.sha256(b'token').hexdigest(),'test'))
+            db.executescript('CREATE TABLE digital_boards(session_id TEXT, id TEXT, record TEXT); CREATE TABLE digital_board_detours(session_id TEXT,board_id TEXT,id TEXT,record TEXT);')
+            db.execute('INSERT INTO digital_boards VALUES(?,?,?)',('test','board',json.dumps(board)))
+            db.execute('INSERT INTO digital_board_detours VALUES(?,?,?,?)',('test','board','detour',json.dumps(detour)))
+        return board,detour
+
+    def test_whiteboard_selection_explanation_reuses_endpoint_and_only_current_visible_context(self):
+        self.board_selection_fixture(); original=copy.deepcopy(self.state)
+        body=server.ExplainSelection(message_id='visible-lecture',text='系数',board_id='board',step_id='main-step')
+        with patch.object(server,'configured',return_value=True),patch.object(server,'complete',return_value='系数是字母前面的乘数。') as model:
+            result=server.explain_selection('test',body,token='token')
+        self.assertEqual(result['text'],'系数是字母前面的乘数。')
+        data=model.call_args.args[1]
+        self.assertEqual(data['source_kind'],'whiteboard'); self.assertIn('每次变化多少',data['source_passage'])
+        self.assertEqual(data['lecture_context'],'授课完整上下文。')
+        self.assertNotIn('PRIVATE',json.dumps(data)); self.assertNotIn('FUTURE',json.dumps(data))
+        self.assertEqual(self.read(),original)
+
+    def test_detour_selection_explanation_has_actual_detour_not_main_board(self):
+        self.board_selection_fixture(); original=copy.deepcopy(self.state)
+        body=server.ExplainSelection(message_id='visible-lecture',text='乘数',board_id='board',step_id='detour-step',detour_id='detour')
+        with patch.object(server,'configured',return_value=True),patch.object(server,'complete',return_value='相乘的那个数。') as model:
+            server.explain_selection('test',body,token='token')
+        data=model.call_args.args[1]
+        self.assertEqual(data['source_kind'],'detour'); self.assertIn('字母前面的乘数',data['source_passage'])
+        self.assertNotIn('每次变化多少',data['source_passage']); self.assertNotIn('PRIVATE',json.dumps(data))
+        self.assertEqual(self.read(),original)
+
+    def test_selection_context_rejects_cross_session_mismatched_source_and_stale_step(self):
+        from fastapi import HTTPException
+        self.board_selection_fixture(); source=self.state['messages'][0]['id']
+        cases=[({'board_id':'missing','step_id':'main-step'},404),({'board_id':'board'},422),
+               ({'board_id':'board','step_id':'stale'},404),({'board_id':'board','step_id':'detour-step','detour_id':'missing'},404),
+               ({'message_id':source,'board_id':'board','step_id':'main-step'},422)]
+        with patch.object(server,'complete') as model:
+            for changes,code in cases:
+                body=server.ExplainSelection(**{'message_id':'visible-lecture','text':'系数',**changes})
+                with self.assertRaises(HTTPException) as error:server.explain_selection('test',body,token='token')
+                self.assertEqual(error.exception.status_code,code)
+            with server.connect() as db:
+                with self.assertRaises(HTTPException) as error:server.digital_board.selection_context(db,'other-session','visible-lecture','board','main-step')
+                self.assertEqual(error.exception.status_code,404)
+            model.assert_not_called()

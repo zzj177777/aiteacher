@@ -44,6 +44,14 @@ class TutorTests(unittest.TestCase):
 
 
 class DiagnosticsTests(unittest.TestCase):
+    def test_tool_repair_timeout_is_forwarded_without_changing_payload(self):
+        from backend import tutor
+        response={'choices':[{'message':{'tool_calls':[{'function':{'name':'test','arguments':'{}'}}]}}]}
+        with patch.dict(os.environ,{'AI_MODEL':'test','AI_API_URL':'https://example.test','AI_API_KEY':'test'}),patch.object(tutor,'request_completion',return_value=response) as request:
+            tutor.call_tool('test',{},[],timeout=7)
+        self.assertEqual(request.call_args.kwargs['timeout'],7)
+        self.assertNotIn('timeout',request.call_args.args[0])
+
     def invoke(self, response):
         from backend.tutor import call_tool
         with patch.dict(os.environ, {'AI_MODEL':'test','AI_API_URL':'https://example.test','AI_API_KEY':'test'}), patch('backend.tutor.request_completion',return_value=response):

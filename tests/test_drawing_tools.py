@@ -58,7 +58,7 @@ class DrawingTests(unittest.TestCase):
         self.assertTrue(any(m.get('to_agent')=='drawing' for m in state['messages']))
 
     def test_tool_schema_allows_empty_visuals_and_validates_structure(self):
-        args=dict(message='文字',covered='概念',next_suggestion='继续',visuals=[])
+        args=dict(message='文字',covered='概念',next_suggestion='继续',visuals=[],assessment_request={'objective':'检查概念','covered':'概念','prerequisites':'尚未确认','reason':'小节结束'})
         with patch.object(chat,'call_tool',return_value=dict(tool='submit_lecturer_result',arguments=args)):
             self.assertEqual(chat.specialist(chat.new_state(),'lecturer','讲概念')['visuals'],[])
 

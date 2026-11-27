@@ -4,10 +4,7 @@ const assert = require('node:assert/strict');
 const ts = require('typescript');
 const React = require('react');
 const { renderToStaticMarkup } = require('react-dom/server');
-const source = fs.readFileSync(path.join(__dirname, '../src/RichText.tsx'), 'utf8');
-const compiled = ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText;
-const componentModule = {exports:{}};
-new Function('require','module','exports',compiled)(require,componentModule,componentModule.exports);
+const componentModule = {exports:require('./load_ts.cjs')('src/RichText.tsx')};
 const render = text => renderToStaticMarkup(React.createElement(componentModule.exports.default,{text}));
 assert.match(render('这是**重点**，再看**第二点**。'), /<strong>重点<\/strong>，再看<strong>第二点<\/strong>/);
 assert.equal(render('尚未闭合的**强调'), '尚未闭合的**强调');
@@ -71,3 +68,27 @@ assert.ok(escapedAnnotation.includes('第一行\n这里的'));
 assert.match(escapedAnnotation,/<strong><mark[^>]+>分母<\/mark><\/strong>/);
 assert.ok(escapedAnnotation.includes('data-plain-ids="annotation-1"'));
 console.log('Escaped newline checks passed (planner lists, blank lines, emphasis, source offsets, code and LaTeX preservation).');
+
+const reportedTable='以 `y=2x+1` 为例：\n\n| `x` | 计算 | `y` | 点 |\n|---|---|---|---|\n| `0` | `2×0+1` | `1` | `(0,1)` |\n| `1` | `2×1+1` | `3` | `(1,3)` |\n| `−1` | `2×(−1)+1` | `−1` | `(−1,−1)` |';
+for(const input of [reportedTable,reportedTable.replace(/\n/g,'\\n'),reportedTable.replace(/\n/g,'\r\n')]){
+ const html=render(input);
+ assert.equal((html.match(/<table /g)||[]).length,1);
+ assert.equal((html.match(/<th /g)||[]).length,4);
+ assert.equal((html.match(/<td /g)||[]).length,12);
+ assert.ok(html.includes('<code>(−1,−1)</code>'));
+ assert.ok(!html.includes('|---|'));
+}
+const tableMath=String.raw`| **输入** | 输出 |
+|:---|---:|
+| $|x|$ | $\frac{1}{2}$ |
+| a\|b | <img src=x onerror=alert(1)> |`;
+const tableHtml=render(tableMath);
+assert.equal((tableHtml.match(/class="katex"/g)||[]).length,2);
+assert.ok(tableHtml.includes('text-align:right'));
+assert.ok(tableHtml.includes('a|b'));
+assert.ok(!tableHtml.includes('<img'));assert.ok(tableHtml.includes('&lt;img'));
+assert.ok(annotate(reportedTable,'2×(−1)+1').includes('data-plain-ids="annotation-1"'));
+assert.equal((render('```markdown\n'+reportedTable+'\n```').match(/<table /g)||[]).length,0);
+assert.equal(render('普通文字 A | B，没有分隔行。'),'普通文字 A | B，没有分隔行。');
+assert.ok(render('| A | B |\n|---|\n| 1 | 2 |').includes('|---|'));
+console.log('Table checks passed (reported function example, newlines, math/code cells, escaped pipes, alignment, annotations, fenced code and escaped HTML).');

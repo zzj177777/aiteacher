@@ -37,6 +37,7 @@ async def fake_model(request:Request):
         if '辅助失败' in objective:text+='（模拟辅助失败）'
         args={'message':text+'\n\n把一张饼平均分成4块，拿走其中1块，可以写成 $\\frac{1}{4}$。你想再看一个例子吗？',
               'covered':term+'的含义','next_suggestion':'检查理解','visuals':[]}
+        args['assessment_request']={'objective':objective,'covered':args['covered'],'prerequisites':'尚未确认','reason':'检查理解'}
         if '批注演示' in objective:args['message']=DEMO
     elif name=='explain_lecture_plainly':
         key=data['source_message_id'];attempts[key]=attempts.get(key,0)+1

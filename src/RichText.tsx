@@ -1,5 +1,6 @@
 import React from 'react';
 import katex from 'katex';
+import {markdownTables} from './markdownTables';
 
 // Normalize only complete math tokens, never dialogue text or programming code.
 // A second JSON-style escaping layer doubles every slash, including matrix rows.
@@ -51,17 +52,18 @@ function highlightText(text:string,start:number,annotations:TextAnnotation[]){
 // Decode only standalone prose escapes, after code/math have been tokenized.
 // Keep raw source offsets so quote annotations still point to the right words.
 function proseText(text:string,start:number,annotations:TextAnnotation[]){
- const breaks=Array.from(text.matchAll(/(?<!\\)\\(?:r\\n|n)(?![a-zA-Z])/g));
+ const breaks=Array.from(text.matchAll(/(?<!\\)\\(?:r\\n|n)(?![a-zA-Z])|(?<!\\)\\\|/g));
  if(!breaks.length)return highlightText(text,start,annotations);
  let cursor=0;
  return <>{breaks.map(match=>{
   const index=match.index!,before=cursor;cursor=index+match[0].length;
-  return <React.Fragment key={index}>{highlightText(text.slice(before,index),start+before,annotations)}{highlightOpaque('\n',start+index,start+cursor,annotations)}</React.Fragment>;
+  return <React.Fragment key={index}>{highlightText(text.slice(before,index),start+before,annotations)}{highlightOpaque(match[0].endsWith('|')?'|':'\n',start+index,start+cursor,annotations)}</React.Fragment>;
  })}{highlightText(text.slice(cursor),start+cursor,annotations)}</>;
 }
 
 // Only KaTeX-generated HTML is inserted. Model HTML remains escaped React text.
-export default function RichText({text,annotations=[],sourceOffset=0}:{text:string;annotations?:TextAnnotation[];sourceOffset?:number}){
+type RichTextProps={text:string;annotations?:TextAnnotation[];sourceOffset?:number};
+function InlineRichText({text,annotations=[],sourceOffset=0}:RichTextProps){
  const parts=text.split(/(```[\s\S]*?```|`[^`\n]+`|\$\$[\s\S]+?\$\$|\\{1,2}\[[\s\S]+?\\{1,2}\]|\\{1,2}\([\s\S]+?\\{1,2}\)|(?<![\\$])\$(?!\$)[^$\n]+?(?<!\\)\$(?![\d$])|\*\*[\s\S]+?\*\*)/g);
  let cursor=sourceOffset;
  return <>{parts.map((part,i)=>{
@@ -83,7 +85,23 @@ export default function RichText({text,annotations=[],sourceOffset=0}:{text:stri
   }
   const math=mathToken(part);
   if(math)return wrap(<Formula source={part} {...math}/>,math.display);
-  if(part.startsWith('**')&&part.endsWith('**'))return <strong key={i}><RichText text={part.slice(2,-2)} annotations={annotations} sourceOffset={start+2}/></strong>;
+  if(part.startsWith('**')&&part.endsWith('**'))return <strong key={i}><InlineRichText text={part.slice(2,-2)} annotations={annotations} sourceOffset={start+2}/></strong>;
   return <React.Fragment key={i}>{proseText(part,start,annotations)}</React.Fragment>;
  })}</>;
+}
+
+export default function RichText({text,annotations=[],sourceOffset=0}:RichTextProps){
+ const tables=markdownTables(text);
+ if(!tables.length)return <InlineRichText text={text} annotations={annotations} sourceOffset={sourceOffset}/>;
+ const parts:React.ReactNode[]=[];let cursor=0;
+ for(const table of tables){
+  if(cursor<table.start)parts.push(<InlineRichText key={`text-${cursor}`} text={text.slice(cursor,table.start)} annotations={annotations} sourceOffset={sourceOffset+cursor}/>);
+  parts.push(<div key={`table-${table.start}`} className="rich-table-wrap" role="region" aria-label="教学表格" tabIndex={0}><table className="rich-table">
+   <thead><tr>{table.header.map((cell,i)=><th key={i} scope="col" style={{textAlign:table.align[i]}}><InlineRichText text={cell.text} annotations={annotations} sourceOffset={sourceOffset+cell.start}/></th>)}</tr></thead>
+   <tbody>{table.rows.map((row,i)=><tr key={i}>{row.map((cell,j)=><td key={j} style={{textAlign:table.align[j]}}><InlineRichText text={cell.text} annotations={annotations} sourceOffset={sourceOffset+cell.start}/></td>)}</tr>)}</tbody>
+  </table></div>);
+  cursor=table.end;
+ }
+ if(cursor<text.length)parts.push(<InlineRichText key={`text-${cursor}`} text={text.slice(cursor)} annotations={annotations} sourceOffset={sourceOffset+cursor}/>);
+ return <>{parts}</>;
 }

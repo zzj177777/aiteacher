@@ -8,6 +8,16 @@ from unittest.mock import patch
 from backend import tutor,usage
 
 class UsageTests(unittest.TestCase):
+    def test_annotation_model_override_is_per_call_and_ledger_uses_actual_model(self):
+        response={'choices':[{'message':{'tool_calls':[{'function':{'name':'annotate_teaching_board','arguments':'{"steps":[]}'}}]}}], 'usage':{'prompt_tokens':10,'completion_tokens':5}}
+        with usage.scope(session_id='annotation-session',agent='attention_designer'),patch('backend.tutor.urlopen',return_value=io.BytesIO(json.dumps(response).encode())) as call:
+            tutor.call_tool('test',{},[],model='annotation-only-model')
+        self.assertEqual(json.loads(call.call_args.args[0].data)['model'],'annotation-only-model')
+        self.assertEqual(os.environ['AI_MODEL'],'test-model')
+        record=usage.summary('annotation-session')['recent_calls'][0]
+        self.assertEqual(record['model'],'annotation-only-model');self.assertEqual(record['agent'],'attention_designer')
+        self.assertIsNone(record['estimated_cost'])
+
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()
         self.env=patch.dict(os.environ,{'AITEACHER_USAGE_DB':str(Path(self.temp.name)/'usage.sqlite3'),'AI_API_URL':'https://example.test/chat/completions','AI_API_KEY':'private-secret','AI_MODEL':'test-model','AI_PRICE_MODEL':'test-model','AI_INPUT_PRICE_PER_MILLION':'2','AI_OUTPUT_PRICE_PER_MILLION':'8','AI_CACHE_HIT_PRICE_PER_MILLION':'0.5','AI_PRICE_CURRENCY':'CNY'})

@@ -1,7 +1,7 @@
 import React,{useEffect,useState} from 'react';
 type Call={id:string;agent?:string;model:string;status:string;prompt_tokens?:number;completion_tokens?:number;duration_ms:number;estimated_cost:number|null;currency:string;error_code?:string};
 type Usage={call_count:number;failed_calls:number;prompt_tokens:number;completion_tokens:number;usage_unknown_calls:number;unpriced_calls:number;estimated_costs:Record<string,number>;duration_ms:number;recent_calls:Call[]};
-const agentNames:Record<string,string>={board_designer:'板书编排',board_check:'本步理解检查',planner:'教学安排 Agent',lecturer:'授课 Agent',assessment:'测评 Agent',plain_language:'通俗讲解 Agent',explainer:'选中解释助手',course_guard:'课程范围检查'};
+const agentNames:Record<string,string>={board_repair:'板书自动修复',attention_designer:'教学标注 Agent',lecturer_detour:'支线补讲',board_designer:'板书编排',board_check:'本步理解检查',planner:'教学安排 Agent',lecturer:'授课 Agent',assessment:'测评 Agent',plain_language:'通俗讲解 Agent',explainer:'选中解释助手',course_guard:'课程范围检查'};
 export default function UsagePanel({credential,revision}:{credential:{session_id:string;token:string};revision:number}){
  const [usage,setUsage]=useState<Usage|null>(null);const [error,setError]=useState('');const [refresh,setRefresh]=useState(0);
  useEffect(()=>{

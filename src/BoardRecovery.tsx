@@ -1,0 +1,6 @@
+export type RecoveryReport={target:number;repair_count:number;status:string;stop_reason?:string;attempts:{attempt:number;kind:string;status:string;step?:number;issues?:{code:string;message?:string;step?:number;actual_length?:number;target?:number}[]}[]};
+const kinds:Record<string,string>={initial:'初次整理',targeted:'局部重新编排',regenerate:'根据校验错误重新生成'};
+export default function BoardRecovery({report}:{report?:RecoveryReport}){
+ if(!report||(report.repair_count===0&&report.status!=='failed'))return null;
+ return <details className="board-recovery"><summary>{report.status==='long_fallback'?'保留完整长板书':report.status==='failed'?'自动整理未成功':`已自动整理 ${report.repair_count} 次`}</summary><div><p>篇幅目标为 {report.target} 字符，超出不会直接阻断学习。</p><ol>{report.attempts.map((entry,i)=><li key={i}><strong>{kinds[entry.kind]||'自动整理'}{entry.step?` · 第 ${entry.step} 块`:''}</strong><span>{entry.status==='valid'?'通过内容校验':'未通过'}{entry.issues?.length?'，发现以下问题':''}</span>{entry.issues?.map((issue,j)=><p key={j}>{issue.actual_length!==undefined?`第 ${issue.step} 块 ${issue.actual_length} / 目标 ${issue.target} 字符。`:''}{issue.message}<code>{issue.code}</code></p>)}</li>)}</ol>{report.status==='long_fallback'&&<p>保留通过校验的完整版本，可在白板内滚动阅读。</p>}{report.status==='failed'&&<p>没有可安全使用的板书版本，授课原文已保留。</p>}</div></details>;
+}

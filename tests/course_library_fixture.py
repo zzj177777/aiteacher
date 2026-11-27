@@ -62,6 +62,7 @@ async def fake_model(request:Request):
         args=dict(message='函数描述两个量一起变化的关系。一个输入对应一个输出。',covered='函数的含义',next_suggestion='结合例子检查',visuals=[])
         if classroom.get('school_context'):
             args.update(message='把一个整体平均分成几份，分数就能表示其中的一份或几份。',covered=classroom.get('profile',{}).get('goal','分数的意义'))
+        args['assessment_request']={'objective':'检查本节理解','covered':args['covered'],'prerequisites':'尚未确认','reason':'本小节讲解完成'}
     elif name=='explain_lecture_plainly':
         args=dict(takeaway='先看一个输入和对应的输出。',concepts=[])
     else:
